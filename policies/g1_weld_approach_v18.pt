@@ -5,6 +5,7 @@
   "behavior": "g1_weld_approach",
   "robot": "Unitree G1-compatible humanoid proxy",
   "backend": "scripted-vla-shim",
+  "showcase_note": "First Behavior CI showcase PR commit intentionally keeps this regressed policy selected.",
   "controller": {
     "type": "scripted_trajectory",
     "script": "controllers/g1_weld_approach_v18.py"
