@@ -10,5 +10,6 @@
     "script": "controllers/g1_weld_approach_v19.py"
   },
   "expected_demo_result": "passed",
+  "showcase_note": "Second Behavior CI showcase PR commit selects the fixed policy and should turn the check green.",
   "training_note": "Obstacle-shift augmentation and guarded weld-approach angle restored."
 }
