@@ -1,0 +1,30 @@
+schema_version: behavior-ci-eval/v1
+world: tabletop_welding_obstacle_shift_v1
+behavior: g1_weld_approach
+runs: 8
+checks:
+  target_reach:
+    metric: torch_tip_distance_to_target_cm
+    operator: <=
+    value: 2.0
+    required: true
+  collision_free:
+    metric: collision_count
+    operator: ==
+    value: 0
+    required: true
+  safety_zone_clear:
+    metric: restricted_zone_intrusions
+    operator: ==
+    value: 0
+    required: true
+  base_stable:
+    metric: max_base_tilt_degrees
+    operator: <=
+    value: 5.0
+    required: true
+  timeout_free:
+    metric: elapsed_seconds
+    operator: <
+    value: 30
+    required: true

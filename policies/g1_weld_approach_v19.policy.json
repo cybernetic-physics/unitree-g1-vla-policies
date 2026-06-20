@@ -1,0 +1,6 @@
+{
+  "schema_version": "behavior-ci-policy-sidecar/v1",
+  "policy_ref": "policies/g1_weld_approach_v19.pt",
+  "policy_id": "g1_weld_approach_v19",
+  "expected_demo_result": "passed"
+}
