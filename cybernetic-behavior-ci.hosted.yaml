@@ -17,6 +17,9 @@ simulator:
   session:
     scene_env: behavior-ci-tabletop-welding
     camera: /World/Cameras/BehaviorCI_PassFailCamera
+    # Pin a dedicated rtx4090: the warm pool currently serves a stale node image
+    # whose Isaac MCP bridge never connects (warm-node image not yet promoted).
+    gpu_spec: rtx4090
     spawn_robot: g1
     spawn_position: [0, -0.55, 0]
     module_path: isaac/behavior_ci_env.py
