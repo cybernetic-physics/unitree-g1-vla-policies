@@ -1,0 +1,94 @@
+name: Cybernetic Behavior CI (hosted Isaac)
+
+# Real backend: boots a hosted Cybernetic Physics Isaac session from the saved
+# welding environment, runs the policy rollout in physics, and captures replay
+# video from the pass/fail camera. Manual + gated on org secrets, never on forks.
+
+on:
+  workflow_dispatch:
+    inputs:
+      policy_ref:
+        description: Policy manifest path under policies/*.pt
+        required: true
+        default: policies/g1_weld_approach_v18.pt
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CYBERNETICS_SDK_SPEC: "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@main"
+
+jobs:
+  hosted:
+    name: Behavior CI obstacle-shift suite (hosted Isaac)
+    runs-on: ubuntu-latest
+    environment: behavior-ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guard on required secrets
+        shell: bash
+        env:
+          CYBERNETICS_API_KEY: ${{ secrets.CYBERNETICS_API_KEY }}
+          CYBERNETICS_BASE_URL: ${{ secrets.CYBERNETICS_BASE_URL }}
+          BEHAVIOR_CI_ENV_ID: ${{ secrets.BEHAVIOR_CI_ENV_ID }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for v in CYBERNETICS_API_KEY CYBERNETICS_BASE_URL BEHAVIOR_CI_ENV_ID; do
+            if [ -z "${!v:-}" ]; then echo "::error::missing secret $v"; missing=1; fi
+          done
+          [ "$missing" = "0" ] || { echo "Hosted Isaac run needs org secrets; see README."; exit 2; }
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Cybernetics SDK
+        run: pip install "${CYBERNETICS_SDK_SPEC}"
+
+      - name: Run Behavior CI (hosted Isaac session)
+        id: run
+        shell: bash
+        env:
+          CYBERNETICS_API_KEY: ${{ secrets.CYBERNETICS_API_KEY }}
+          CYBERNETICS_BASE_URL: ${{ secrets.CYBERNETICS_BASE_URL }}
+          CYBERNETICS_MCP_URL: ${{ secrets.CYBERNETICS_MCP_URL }}
+          CYBERNETICS_MCP_API_KEY: ${{ secrets.CYBERNETICS_MCP_API_KEY }}
+          CYBERNETICS_WORKSPACE_ID: ${{ secrets.CYBERNETICS_WORKSPACE_ID }}
+          BEHAVIOR_CI_ENV_ID: ${{ secrets.BEHAVIOR_CI_ENV_ID }}
+        run: |
+          set +e
+          cybernetics behavior-ci run \
+            --config cybernetic-behavior-ci.hosted.yaml \
+            --policy-ref "${{ github.event.inputs.policy_ref }}" \
+            --eval obstacle_shift \
+            --out artifacts/behavior-ci
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact bundle (incl. real Isaac replays)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: behavior-ci-hosted-artifacts
+          path: artifacts/behavior-ci
+          if-no-files-found: error
+
+      - name: Job summary
+        if: always()
+        shell: bash
+        run: |
+          [ -f artifacts/behavior-ci/comment.md ] && cat artifacts/behavior-ci/comment.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Finalize result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="${{ steps.run.outputs.exit_code }}"
+          case "$code" in
+            0) echo "behavior passed" ;;
+            1) echo "::error::robot behavior regression"; exit 1 ;;
+            *) echo "::error::hosted behavior CI failed (exit $code)"; exit "$code" ;;
+          esac

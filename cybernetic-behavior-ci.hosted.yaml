@@ -1,0 +1,30 @@
+schema_version: cybernetic-behavior-ci-config/v1
+project: unitree-g1-vla-policies
+robot: Unitree G1-compatible humanoid proxy
+
+artifacts:
+  out: artifacts/behavior-ci
+  # Hosted runs must produce genuine Isaac session replay video.
+  require_replay_provenance: isaac-sim-session-video
+
+simulator:
+  # Real backend: boots a hosted Cybernetic Physics Isaac session from a saved
+  # environment and drives it over the MCP bridge. Requires CYBERNETICS_API_KEY
+  # (+ base URL / MCP URL) in the environment.
+  adapter: isaac-session
+  base_url_env: CYBERNETICS_BASE_URL
+  session:
+    scene_env: behavior-ci-tabletop-welding
+    # Published environment id for the welding scene. Leave unset here and provide
+    # it via the BEHAVIOR_CI_ENV_ID environment variable (set after authoring/publish).
+    camera: /World/Cameras/BehaviorCI_PassFailCamera
+    idle_timeout_minutes: 30
+    ready_timeout_seconds: 900
+
+policy_backends:
+  scripted-vla-shim:
+    type: scripted
+
+evals:
+  obstacle_shift:
+    path: evals/g1_weld_obstacle_shift.yaml

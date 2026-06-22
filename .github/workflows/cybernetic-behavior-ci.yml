@@ -1,19 +1,23 @@
 name: Cybernetic Behavior CI
 
+# Default public check: runs the deterministic fixture adapter. No secrets, no
+# GPU — every external contributor's PR gets a red/green robot-behavior verdict.
+# Real hosted-Isaac runs live in behavior-ci-hosted.yml (manual, gated on secrets).
+
 on:
   pull_request:
     paths:
       - "policies/**"
       - "configs/**"
       - "evals/**"
-      - "scripts/**"
+      - "cybernetic-behavior-ci.yaml"
       - "assets/isaac-replays/**"
       - ".github/workflows/cybernetic-behavior-ci.yml"
   workflow_dispatch:
     inputs:
       policy_ref:
-        description: Policy manifest path under this repository.
-        required: true
+        description: Policy manifest path under policies/*.pt
+        required: false
         default: policies/g1_weld_approach_v18.pt
         type: string
 
@@ -21,23 +25,26 @@ permissions:
   contents: read
   pull-requests: write
   checks: write
-  actions: read
+
+# The SDK provides the runner: `cybernetics behavior-ci run`.
+env:
+  CYBERNETICS_SDK_SPEC: "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@main"
 
 jobs:
   behavior-ci:
-    name: Behavior CI obstacle-shift suite
+    name: Behavior CI obstacle-shift suite (fixture)
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Install Cybernetics SDK
+        run: pip install "${CYBERNETICS_SDK_SPEC}"
 
       - name: Resolve policy ref
         id: policy
@@ -48,127 +55,77 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-
           policy_ref="${INPUT_POLICY_REF:-}"
           if [ -z "$policy_ref" ] && [ "$EVENT_NAME" = "pull_request" ]; then
             git fetch --no-tags --depth=1 origin "$BASE_REF"
-            changed_policy="$(
-              git diff --name-only "origin/$BASE_REF"...HEAD -- \
-                'policies/*.pt' \
-                | sort \
-                | tail -n 1
-            )"
-            policy_ref="$changed_policy"
+            policy_ref="$(git diff --name-only "origin/$BASE_REF"...HEAD -- 'policies/*.pt' | sort | tail -n 1)"
           fi
           if [ -z "$policy_ref" ]; then
-            if [ "$EVENT_NAME" = "pull_request" ]; then
-              policy_ref="policies/g1_weld_approach_v19.pt"
-            else
-              policy_ref="policies/g1_weld_approach_v18.pt"
-            fi
+            policy_ref="policies/g1_weld_approach_v19.pt"
           fi
-
           case "$policy_ref" in
             policies/*.pt) ;;
-            *)
-              echo "::error::Policy ref must be a policy manifest under policies/*.pt"
-              exit 2
-              ;;
+            *) echo "::error::policy ref must be policies/*.pt"; exit 2 ;;
           esac
-
           echo "policy_ref=$policy_ref" >> "$GITHUB_OUTPUT"
           echo "Resolved policy: $policy_ref"
 
       - name: Run Behavior CI
-        id: run_behavior_ci
+        id: run
         shell: bash
         run: |
           set +e
-          python3 scripts/cybernetic_behavior_ci.py \
-            --robot unitree-g1-or-selected-humanoid \
+          cybernetics behavior-ci run \
+            --config cybernetic-behavior-ci.yaml \
             --policy-ref "${{ steps.policy.outputs.policy_ref }}" \
-            --task configs/tasks/tabletop_welding.yaml \
-            --eval evals/g1_weld_obstacle_shift.yaml \
-            --scene-env behavior-ci-tabletop-welding \
-            --camera /World/Cameras/BehaviorCI_PassFailCamera \
-            --out artifacts \
-            --replay-source-dir assets/isaac-replays \
-            --require-isaac-replays \
-            --artifact-base-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          exit_code="$?"
-          set -e
-          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+            --eval obstacle_shift \
+            --out artifacts/behavior-ci
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact bundle
-        uses: actions/upload-artifact@v4
         if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: behavior-ci-artifacts
-          path: artifacts
+          path: artifacts/behavior-ci
           if-no-files-found: error
 
-      - name: Add job summary
+      - name: Job summary
         if: always()
         shell: bash
         run: |
-          set -euo pipefail
-          if [ -f artifacts/comment.md ]; then
-            cat artifacts/comment.md >> "$GITHUB_STEP_SUMMARY"
-          fi
+          [ -f artifacts/behavior-ci/comment.md ] && cat artifacts/behavior-ci/comment.md >> "$GITHUB_STEP_SUMMARY" || true
 
-      - name: Upsert pull request comment
+      - name: Upsert PR comment
         if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
+            const path = 'artifacts/behavior-ci/comment.md';
+            if (!fs.existsSync(path)) { core.warning('no comment.md produced'); return; }
             const marker = '<!-- cybernetic-behavior-ci -->';
-            const commentPath = 'artifacts/comment.md';
-            if (!fs.existsSync(commentPath)) {
-              core.warning('Behavior CI comment artifact was not generated.');
-              return;
-            }
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const body = fs.readFileSync(commentPath, 'utf8') + `\n\nArtifacts: [behavior-ci-artifacts](${runUrl})`;
+            const body = fs.readFileSync(path, 'utf8') + `\n\nArtifacts: [behavior-ci-artifacts](${runUrl})`;
             const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              per_page: 100,
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.issue.number, per_page: 100,
             });
-            const existing = comments.find(comment => comment.body && comment.body.includes(marker));
+            const existing = comments.find(c => c.body && c.body.includes(marker));
             if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
+              await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body });
             } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
+              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body });
             }
 
-      - name: Finalize Behavior CI result
+      - name: Finalize result (red on behavior regression)
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          exit_code="${{ steps.run_behavior_ci.outputs.exit_code }}"
-          if [ -z "$exit_code" ]; then
-            echo "::error::Behavior CI did not produce an exit code"
-            exit 3
-          fi
-          if [ "$exit_code" -eq 0 ]; then
-            exit 0
-          fi
-          if [ "$exit_code" -eq 1 ]; then
-            echo "::error::Behavior CI detected a robot behavior regression"
-            exit 1
-          fi
-          echo "::error::Behavior CI infrastructure or artifact failure, exit code $exit_code"
-          exit "$exit_code"
+          code="${{ steps.run.outputs.exit_code }}"
+          case "$code" in
+            0) echo "behavior passed"; exit 0 ;;
+            1) echo "::error::robot behavior regression"; exit 1 ;;
+            *) echo "::error::behavior CI failed (exit $code)"; exit "$code" ;;
+          esac

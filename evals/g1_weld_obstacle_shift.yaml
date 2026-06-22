@@ -2,6 +2,9 @@ schema_version: behavior-ci-eval/v1
 world: tabletop_welding_obstacle_shift_v1
 behavior: g1_weld_approach
 runs: 8
+
+# Pass/fail rules applied to each trial's metrics. A required check that fails on
+# any trial fails that trial; the run is green only if every trial passes.
 checks:
   target_reach:
     metric: torch_tip_distance_to_target_cm
@@ -28,3 +31,17 @@ checks:
     operator: <
     value: 30
     required: true
+
+# Domain variation: where the obstacle is shifted on each trial, and how much
+# clearance the controller must have to stay safe. A trial fails its `stresses`
+# check when the policy's controller `clearance_margin_cm` is below
+# `required_clearance_cm`. v18 (margin 6) fails runs 3/5/7; v19 (margin 14) clears all.
+scenarios:
+  - { obstacle_shift_cm: 3, required_clearance_cm: 3 }
+  - { obstacle_shift_cm: 5, required_clearance_cm: 5 }
+  - { obstacle_shift_cm: 4, required_clearance_cm: 4 }
+  - { obstacle_shift_cm: 11, required_clearance_cm: 11, stresses: safety_zone }
+  - { obstacle_shift_cm: 6, required_clearance_cm: 6 }
+  - { obstacle_shift_cm: 13, required_clearance_cm: 13, stresses: collision }
+  - { obstacle_shift_cm: 5, required_clearance_cm: 5 }
+  - { obstacle_shift_cm: 10, required_clearance_cm: 10, stresses: timeout }
