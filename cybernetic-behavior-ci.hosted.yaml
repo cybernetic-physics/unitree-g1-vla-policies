@@ -4,22 +4,27 @@ robot: Unitree G1-compatible humanoid proxy
 
 artifacts:
   out: artifacts/behavior-ci
-  # Hosted runs must produce genuine Isaac session replay video.
+  # Hosted runs produce genuine Isaac session replay video.
   require_replay_provenance: isaac-sim-session-video
 
 simulator:
-  # Real backend: boots a hosted Cybernetic Physics Isaac session from a saved
-  # environment and drives it over the MCP bridge. Requires CYBERNETICS_API_KEY
-  # (+ base URL / MCP URL) in the environment.
+  # Real backend: boots a hosted Cybernetic Physics Isaac session, spawns the
+  # Unitree G1, uploads isaac/behavior_ci_env.py, and builds + calibrates the
+  # welding scene at runtime — no dependency on a pre-published environment.
+  # base/MCP URLs default to hosted production in the SDK; only CYBERNETICS_API_KEY
+  # is required in the environment.
   adapter: isaac-session
-  base_url_env: CYBERNETICS_BASE_URL
   session:
     scene_env: behavior-ci-tabletop-welding
-    # Published environment id for the welding scene. Leave unset here and provide
-    # it via the BEHAVIOR_CI_ENV_ID environment variable (set after authoring/publish).
     camera: /World/Cameras/BehaviorCI_PassFailCamera
+    spawn_robot: g1
+    spawn_position: [0, -0.55, 0]
+    module_path: isaac/behavior_ci_env.py
+    setup_entrypoint: setup_scene
     idle_timeout_minutes: 30
     ready_timeout_seconds: 900
+    # Optional: env_id of a pre-published scene to warm-start from (skips authoring).
+    # env_id: env_...
 
 policy_backends:
   scripted-vla-shim:

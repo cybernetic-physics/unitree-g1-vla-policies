@@ -58,12 +58,11 @@ jobs:
     needs: contract
     environment: behavior-ci
     env:
+      # Only the API key is a secret. Base/MCP URLs default to hosted production
+      # in the SDK, and the scene is authored at runtime — so no env id, URLs, or
+      # workspace are needed. (CYBERNETICS_MCP_API_KEY only if the gateway key differs.)
       CYBERNETICS_API_KEY: ${{ secrets.CYBERNETICS_API_KEY }}
-      CYBERNETICS_BASE_URL: ${{ secrets.CYBERNETICS_BASE_URL }}
-      CYBERNETICS_MCP_URL: ${{ secrets.CYBERNETICS_MCP_URL }}
       CYBERNETICS_MCP_API_KEY: ${{ secrets.CYBERNETICS_MCP_API_KEY }}
-      CYBERNETICS_WORKSPACE_ID: ${{ secrets.CYBERNETICS_WORKSPACE_ID }}
-      BEHAVIOR_CI_ENV_ID: ${{ secrets.BEHAVIOR_CI_ENV_ID }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -79,8 +78,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ -z "${CYBERNETICS_API_KEY:-}" ] || [ -z "${BEHAVIOR_CI_ENV_ID:-}" ]; then
-            echo "::notice::Hosted Isaac validation skipped — no platform credentials/env on this repo or fork. The Cybernetic Physics org CI runs the real Unitree G1 eval; sign up to run it on your own robot."
+          if [ -z "${CYBERNETICS_API_KEY:-}" ]; then
+            echo "::notice::Hosted Isaac validation skipped — no CYBERNETICS_API_KEY on this repo or fork. The Cybernetic Physics org CI runs the real Unitree G1 eval; sign up to run it on your own robot."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
