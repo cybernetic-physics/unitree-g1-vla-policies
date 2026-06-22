@@ -4,10 +4,12 @@ robot: Unitree G1-compatible humanoid proxy
 
 artifacts:
   out: artifacts/behavior-ci
-  # If real Isaac session replay clips are committed here, the runner uses them
-  # and records replay_source=checked-in-demo-evidence. Otherwise fixture mode
-  # writes a clearly-labelled placeholder (replay_source=fixture-generated).
   replay_source_dir: assets/isaac-replays
+  # Real Unitree G1 Isaac session captures are committed under replay_source_dir,
+  # so the default fixture check ships genuine replay video (not placeholders) and
+  # records replay_source=checked-in-demo-evidence. Captured live from a hosted
+  # rtx4090 session via the isaac-session adapter + isaac/behavior_ci_env.py.
+  require_replay_provenance: checked-in-demo-evidence
 
 simulator:
   # Default adapter: fast, deterministic, no network, no secrets. Real physics-
