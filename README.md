@@ -61,16 +61,18 @@ Open `artifacts/behavior-ci/report/index.html` for the full report.
 
 | Adapter | What runs | Needs | Config |
 |---|---|---|---|
-| `isaac-session` (the CI gate) | A **real hosted Cybernetic Physics Isaac Sim session**: boots from a saved environment, loads the **real Unitree G1**, runs the weld-approach in physics, measures the metrics off the robot, and captures replay video from the pass/fail camera. | API key + env id | `cybernetic-behavior-ci.hosted.yaml` |
+| `isaac-session` (the CI gate) | A **real hosted Cybernetic Physics Isaac Sim session**: boots a blank session, spawns the **real Unitree G1**, uploads `isaac/behavior_ci_env.py` and builds + calibrates the scene at runtime, runs the weld-approach in physics, measures the metrics off the robot, and captures replay video from the pass/fail camera. | API key only | `cybernetic-behavior-ci.hosted.yaml` |
 | `fixture` (local dev only) | Deterministic model from readable controller params — fast offline check while iterating. Not the CI behavior gate. | nothing | `cybernetic-behavior-ci.yaml` |
 
 The PR check (`.github/workflows/cybernetic-behavior-ci.yml`) runs the **real
 `isaac-session` validation**: it boots a hosted Isaac session, runs the changed
 policy on the G1, and turns the check red/green from the **measured** result.
-It needs the `behavior-ci` Environment secrets (API key + `BEHAVIOR_CI_ENV_ID`),
-which are present on this org's PRs; **fork PRs without credentials skip the
-hosted job with a notice** (they don't fake a green behavior result). An offline
-`contract` job always runs to validate config/SDK wiring (not robot behavior).
+It needs just one secret — `CYBERNETICS_API_KEY` (in the `behavior-ci`
+Environment); base/MCP URLs default to hosted production and the scene is authored
+at runtime, so no env id is required. Present on this org's PRs; **fork PRs without
+the key skip the hosted job with a notice** (they don't fake a green behavior
+result). An offline `contract` job always runs to validate config/SDK wiring (not
+robot behavior).
 Provenance is always explicit in `result.json` / `provenance.json`:
 
 - `simulator_adapter`: `fixture` | `isaac-session`
@@ -89,8 +91,9 @@ To point Behavior CI at *your* robot and task, you provide:
 
 1. **a policy / checkpoint** — a manifest under `policies/` (and, later, a real
    backend that loads your weights),
-2. **an environment** — a saved Cybernetic Physics Isaac environment (`env_id`)
-   with a fixed pass/fail camera prim,
+2. **a scene module** — an `isaac/behavior_ci_env.py` with `setup_scene()` that
+   builds your scene + a fixed pass/fail camera (or a pre-published `env_id` to
+   warm-start from),
 3. **success metrics** — the checks in an eval YAML (`evals/*.yaml`),
 4. **replay requirements** — which camera, and whether real Isaac capture is
    required.
