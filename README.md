@@ -61,15 +61,17 @@ Open `artifacts/behavior-ci/report/index.html` for the full report.
 
 | Adapter | What runs | Needs | Config |
 |---|---|---|---|
-| `fixture` (default) | Deterministic model: real pass/fail logic from readable controller params + scenario distribution. No GPU, no secrets. | nothing | `cybernetic-behavior-ci.yaml` |
-| `isaac-session` | A **real hosted Cybernetic Physics Isaac Sim session**: boots from a saved environment, runs the rollout in physics, captures replay video from the pass/fail camera. | API key + env id | `cybernetic-behavior-ci.hosted.yaml` |
+| `isaac-session` (the CI gate) | A **real hosted Cybernetic Physics Isaac Sim session**: boots from a saved environment, loads the **real Unitree G1**, runs the weld-approach in physics, measures the metrics off the robot, and captures replay video from the pass/fail camera. | API key + env id | `cybernetic-behavior-ci.hosted.yaml` |
+| `fixture` (local dev only) | Deterministic model from readable controller params — fast offline check while iterating. Not the CI behavior gate. | nothing | `cybernetic-behavior-ci.yaml` |
 
-The public PR check (`.github/workflows/cybernetic-behavior-ci.yml`) runs **fixture
-mode** so every contributor's PR gets a verdict without credentials. Fixture mode
-emits a clearly-labelled placeholder replay; the genuine Isaac replay video comes
-from the hosted workflow (`.github/workflows/behavior-ci-hosted.yml`,
-`workflow_dispatch`, gated on org secrets). Provenance is always explicit in
-`result.json` / `provenance.json`:
+The PR check (`.github/workflows/cybernetic-behavior-ci.yml`) runs the **real
+`isaac-session` validation**: it boots a hosted Isaac session, runs the changed
+policy on the G1, and turns the check red/green from the **measured** result.
+It needs the `behavior-ci` Environment secrets (API key + `BEHAVIOR_CI_ENV_ID`),
+which are present on this org's PRs; **fork PRs without credentials skip the
+hosted job with a notice** (they don't fake a green behavior result). An offline
+`contract` job always runs to validate config/SDK wiring (not robot behavior).
+Provenance is always explicit in `result.json` / `provenance.json`:
 
 - `simulator_adapter`: `fixture` | `isaac-session`
 - `replay_source`: `fixture-generated` | `checked-in-demo-evidence` | `isaac-sim-session-video`
@@ -106,12 +108,13 @@ on the SDK, run it on our hosted platform, or co-develop a pilot.
 ## Layout
 
 ```
-cybernetic-behavior-ci.yaml          default (fixture) config
-cybernetic-behavior-ci.hosted.yaml   hosted Isaac config
+cybernetic-behavior-ci.hosted.yaml   hosted Isaac config (the CI gate)
+cybernetic-behavior-ci.yaml          fixture config (local dev only)
 policies/                            v18 (regressed) / v19 (fixed) manifests
 evals/g1_weld_obstacle_shift.yaml    checks + per-trial obstacle-shift scenarios
+isaac/behavior_ci_env.py             in-session entrypoint run on the real G1
 configs/tasks/tabletop_welding.yaml  scene/task description
-assets/isaac-replays/                real Isaac replay clips (added by hosted runs)
-.github/workflows/                    fixture PR check + gated hosted run
+assets/isaac-replays/                real Unitree G1 Isaac replay clips
+.github/workflows/                    real hosted-Isaac PR gate + offline contract job
 tests/test_behavior_ci.py            golden v18-fails / v19-passes contract
 ```
