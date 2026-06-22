@@ -7,12 +7,10 @@
   "backend": "scripted-vla-shim",
   "controller": {
     "type": "scripted_trajectory",
-    "script": "controllers/g1_weld_approach_v18.py"
+    "clearance_margin_cm": 6.0,
+    "replan_enabled": false,
+    "approach_speed_mps": 0.6
   },
   "expected_demo_result": "failed",
-  "demo_failures": [
-    "SAFETY_ZONE_INTRUSION",
-    "OBSTACLE_COLLISION",
-    "TARGET_TIMEOUT"
-  ]
+  "notes": "Regressed weld-approach: the clearance margin is too small for the shifted-obstacle distribution and there is no online replan, so the torch path enters the restricted zone / collides / times out on the harder trials."
 }

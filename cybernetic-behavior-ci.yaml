@@ -1,0 +1,27 @@
+schema_version: cybernetic-behavior-ci-config/v1
+project: unitree-g1-vla-policies
+robot: Unitree G1-compatible humanoid proxy
+
+artifacts:
+  out: artifacts/behavior-ci
+  # If real Isaac session replay clips are committed here, the runner uses them
+  # and records replay_source=checked-in-demo-evidence. Otherwise fixture mode
+  # writes a clearly-labelled placeholder (replay_source=fixture-generated).
+  replay_source_dir: assets/isaac-replays
+
+simulator:
+  # Default adapter: fast, deterministic, no network, no secrets. Real physics-
+  # backed runs use the hosted `isaac-session` adapter (see the hosted config).
+  adapter: fixture
+  base_url_env: CYBERNETICS_BASE_URL
+  session:
+    scene_env: behavior-ci-tabletop-welding
+    camera: /World/Cameras/BehaviorCI_PassFailCamera
+
+policy_backends:
+  scripted-vla-shim:
+    type: scripted
+
+evals:
+  obstacle_shift:
+    path: evals/g1_weld_obstacle_shift.yaml

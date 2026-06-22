@@ -1,62 +1,72 @@
+"""Golden contract for the public showcase: v18 regresses, v19 passes.
+
+These run the installed Cybernetics SDK CLI (`cybernetics behavior-ci run`) over
+the repo's config/policies/eval — the same path CI uses — and assert the
+red/green story. Install the SDK first:
+
+    pip install "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@main"
+"""
+
+from __future__ import annotations
+
 import json
-from pathlib import Path
+import shutil
 import subprocess
-import sys
-import unittest
+from pathlib import Path
+
+import pytest
+
+CLI = shutil.which("cybernetics")
+ROOT = Path(__file__).resolve().parents[1]
+
+pytestmark = pytest.mark.skipif(
+    CLI is None,
+    reason="Cybernetics SDK not installed; pip install 'cybernetic-physics[behavior-ci]'",
+)
 
 
-FIXTURE_ROOT = Path(__file__).resolve().parents[1]
-RUNNER = FIXTURE_ROOT / "scripts" / "cybernetic_behavior_ci.py"
-
-
-class BehaviorCiFixtureTests(unittest.TestCase):
-    def run_policy(self, policy: str) -> tuple[int, dict]:
-        out_dir = FIXTURE_ROOT / "artifacts" / f"test-{policy}"
-        command = [
-            sys.executable,
-            str(RUNNER),
-            "--robot",
-            "unitree-g1-or-selected-humanoid",
+def _run(policy_ref: str, out: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [
+            CLI,
+            "behavior-ci",
+            "run",
+            "--config",
+            "cybernetic-behavior-ci.yaml",
             "--policy-ref",
-            f"policies/{policy}.pt",
-            "--task",
-            "configs/tasks/tabletop_welding.yaml",
+            policy_ref,
             "--eval",
-            "evals/g1_weld_obstacle_shift.yaml",
-            "--scene-env",
-            "behavior-ci-tabletop-welding",
-            "--camera",
-            "/World/Cameras/BehaviorCI_PassFailCamera",
+            "obstacle_shift",
             "--out",
-            str(out_dir),
-            "--no-fail-on-result",
-        ]
-        completed = subprocess.run(command, check=False, cwd=FIXTURE_ROOT)
-        result = json.loads((out_dir / "result.json").read_text(encoding="utf-8"))
-        return completed.returncode, result
-
-    def test_v18_fails_expected_runs(self) -> None:
-        exit_code, result = self.run_policy("g1_weld_approach_v18")
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(result["schema_version"], "behavior-ci/v1")
-        self.assertEqual(result["status"], "failed")
-        self.assertEqual(result["summary"]["passed_runs"], 5)
-        self.assertEqual(result["summary"]["total_runs"], 8)
-        self.assertEqual([failure["run"] for failure in result["failures"]], [3, 5, 7])
-        self.assertEqual(
-            [failure["code"] for failure in result["failures"]],
-            ["SAFETY_ZONE_INTRUSION", "OBSTACLE_COLLISION", "TARGET_TIMEOUT"],
-        )
-
-    def test_v19_passes_all_runs(self) -> None:
-        exit_code, result = self.run_policy("g1_weld_approach_v19")
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(result["schema_version"], "behavior-ci/v1")
-        self.assertEqual(result["status"], "passed")
-        self.assertEqual(result["summary"]["passed_runs"], 8)
-        self.assertEqual(result["summary"]["total_runs"], 8)
-        self.assertEqual(result["failures"], [])
+            str(out),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_v18_fails_runs_3_5_7(tmp_path: Path) -> None:
+    out = tmp_path / "v18"
+    proc = _run("policies/g1_weld_approach_v18.pt", out)
+    assert proc.returncode == 1, proc.stderr
+    result = json.loads((out / "result.json").read_text())
+    assert result["schema_version"] == "behavior-ci/v1"
+    assert result["status"] == "failed"
+    assert result["summary"]["passed_runs"] == 5
+    assert [f["run"] for f in result["failures"]] == [3, 5, 7]
+    assert [f["code"] for f in result["failures"]] == [
+        "SAFETY_ZONE_INTRUSION",
+        "OBSTACLE_COLLISION",
+        "TARGET_TIMEOUT",
+    ]
+
+
+def test_v19_passes_all_runs(tmp_path: Path) -> None:
+    out = tmp_path / "v19"
+    proc = _run("policies/g1_weld_approach_v19.pt", out)
+    assert proc.returncode == 0, proc.stderr
+    result = json.loads((out / "result.json").read_text())
+    assert result["status"] == "passed"
+    assert result["summary"]["passed_runs"] == 8
+    assert result["failures"] == []

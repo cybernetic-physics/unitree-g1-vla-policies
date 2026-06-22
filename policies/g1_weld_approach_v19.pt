@@ -7,8 +7,10 @@
   "backend": "scripted-vla-shim",
   "controller": {
     "type": "scripted_trajectory",
-    "script": "controllers/g1_weld_approach_v19.py"
+    "clearance_margin_cm": 14.0,
+    "replan_enabled": true,
+    "approach_speed_mps": 0.9
   },
   "expected_demo_result": "passed",
-  "training_note": "Obstacle-shift augmentation and guarded weld-approach angle restored."
+  "notes": "Fixed weld-approach: obstacle-shift augmentation widened the clearance margin and enabled online replan, so every trial in the obstacle-shift suite clears the obstacle and the restricted zone."
 }
