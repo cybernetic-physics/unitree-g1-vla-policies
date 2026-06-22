@@ -58,12 +58,12 @@ jobs:
     needs: contract
     environment: behavior-ci
     env:
+      # Secret: only the API key (and the gateway key if it differs).
       CYBERNETICS_API_KEY: ${{ secrets.CYBERNETICS_API_KEY }}
-      CYBERNETICS_BASE_URL: ${{ secrets.CYBERNETICS_BASE_URL }}
-      CYBERNETICS_MCP_URL: ${{ secrets.CYBERNETICS_MCP_URL }}
       CYBERNETICS_MCP_API_KEY: ${{ secrets.CYBERNETICS_MCP_API_KEY }}
-      CYBERNETICS_WORKSPACE_ID: ${{ secrets.CYBERNETICS_WORKSPACE_ID }}
-      BEHAVIOR_CI_ENV_ID: ${{ secrets.BEHAVIOR_CI_ENV_ID }}
+      # Non-secret config. base/MCP URLs default to hosted production in the SDK;
+      # the env id is a repo Variable (it identifies the published showcase env).
+      BEHAVIOR_CI_ENV_ID: ${{ vars.BEHAVIOR_CI_ENV_ID }}
     steps:
       - uses: actions/checkout@v4
         with:

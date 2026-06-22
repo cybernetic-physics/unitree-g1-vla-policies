@@ -67,10 +67,13 @@ Open `artifacts/behavior-ci/report/index.html` for the full report.
 The PR check (`.github/workflows/cybernetic-behavior-ci.yml`) runs the **real
 `isaac-session` validation**: it boots a hosted Isaac session, runs the changed
 policy on the G1, and turns the check red/green from the **measured** result.
-It needs the `behavior-ci` Environment secrets (API key + `BEHAVIOR_CI_ENV_ID`),
-which are present on this org's PRs; **fork PRs without credentials skip the
-hosted job with a notice** (they don't fake a green behavior result). An offline
-`contract` job always runs to validate config/SDK wiring (not robot behavior).
+Config lives in the `behavior-ci` GitHub Environment: one **secret**
+(`CYBERNETICS_API_KEY`) and one **variable** (`BEHAVIOR_CI_ENV_ID`, the published
+showcase env). Base/MCP URLs default to hosted production in the SDK, so nothing
+else is needed. These are present on this org's PRs; **fork PRs without
+credentials skip the hosted job with a notice** (they don't fake a green behavior
+result). An offline `contract` job always runs to validate config/SDK wiring (not
+robot behavior).
 Provenance is always explicit in `result.json` / `provenance.json`:
 
 - `simulator_adapter`: `fixture` | `isaac-session`
