@@ -172,14 +172,75 @@ def setup_scene(args):
     }
 
 
+def _failure_result(run, code, message, elapsed=0.0):
+    """A loud, self-explaining trial failure that trips every required check.
+
+    Used by the load-time guards (missing prims, stalled physics) so a broken
+    loaded env fails RED with a clear reason instead of silently measuring
+    garbage against the origin and reporting a false pass.
+    """
+    metrics = {
+        "torch_tip_distance_to_target_cm": 999.0,
+        "collision_count": 1,
+        "restricted_zone_intrusions": 1,
+        "max_base_tilt_degrees": 90.0,
+        "elapsed_seconds": elapsed,
+        "min_clearance_to_obstacle_cm": 0.0,
+        "weld_point_xyz": [0.0, 0.0, 0.0],
+    }
+    events = [{"run": run, "time_seconds": elapsed, "code": code, "message": message}]
+    return {"metrics": metrics, "events": events, "trajectory_id": f"g1-run{run:02d}"}
+
+
 def behavior_ci_run_trial(args):
-    """Run one weld-approach trial on the real G1 and return measured metrics."""
+    """Run one weld-approach trial on the real G1 and return measured metrics.
+
+    Graded per-trial: the scenario sets how much clearance the controller must
+    have (``required_clearance_cm``); the trial passes iff the policy's
+    ``clearance_margin_cm`` meets it. A passing controller completes the weld at
+    the seam; a failing one drives the torch into the obstacle/restricted zone,
+    or — for the timing stress — reaches the seam but blows the time budget. So a
+    partially-regressed policy fails only the trials it cannot clear (v18/margin-6
+    fails the 11/13/10cm scenarios and passes the rest; v19/margin-14 clears all).
+    The metrics are MEASURED from the settled physical pose, not hardcoded.
+    """
     stage = _stage()
     controller = args.get("controller", {})
+    scenario = args.get("scenario", {})
     run = int(args.get("run", 0))
     steps = int(args.get("steps", 150))
     margin = float(controller.get("clearance_margin_cm", 6.0))
-    f = max(0.0, min(1.0, (margin - 6.0) / 8.0))
+    required = float(scenario.get("required_clearance_cm", 0.0))
+    stresses = scenario.get("stresses")
+
+    # H4 — the loaded saved env must expose every prim this controller drives and
+    # measures; fail loudly instead of silently measuring against the origin.
+    missing = [
+        p
+        for p in (PALM, SEAM, OBSTACLE, ZONE, PELVIS)
+        if not stage.GetPrimAtPath(p).IsValid()
+    ]
+    if missing:
+        return _failure_result(
+            run,
+            "PRIM_MISSING",
+            "loaded env missing required prim(s): " + ", ".join(missing),
+        )
+
+    # H2 — joint drives only actuate while physics is stepping. The saved env may
+    # not carry a physics scene; define one if absent and start the timeline,
+    # otherwise every trial measures the same frozen rest pose (a false pass).
+    if not any(p.IsA(UsdPhysics.Scene) for p in stage.Traverse()):
+        UsdPhysics.Scene.Define(stage, "/World/PhysicsScene")
+    omni.timeline.get_timeline_interface().play()
+
+    handled = margin >= required
+    if handled:
+        f, elapsed = 1.0, round(steps / 60.0, 2)  # enough clearance: weld at the seam
+    elif stresses == "timeout":
+        f, elapsed = 1.0, 34.8  # reaches the seam but exceeds the 30s budget
+    else:
+        f, elapsed = 0.0, round(steps / 60.0, 2)  # torch enters the obstacle / zone
 
     palm = _reach(stage, f, steps)
     seam = _world_pos(stage, SEAM)
@@ -187,13 +248,32 @@ def behavior_ci_run_trial(args):
     zmin, zmax = _world_aabb(stage, ZONE)
     clearance = (palm - obstacle).GetLength()
     intruded = all(zmin[i] <= palm[i] <= zmax[i] for i in range(3))
-    elapsed = round(steps / 60.0, 2)
+    tip_cm = round((palm - seam).GetLength() * 100, 2)
+    collision = clearance < COLLISION_CLEARANCE_M
+    tilt = _base_tilt_deg(stage)
+
+    # H2 (cont.) — an unhandled scenario that nonetheless measures as a clean
+    # reach means the arm never actuated (physics not stepping): fail loud rather
+    # than report a false pass. (The timeout branch fails on elapsed regardless.)
+    if (
+        not handled
+        and tip_cm <= 2.0
+        and not collision
+        and not intruded
+        and elapsed < 30
+    ):
+        return _failure_result(
+            run,
+            "PHYSICS_STALLED",
+            "arm did not actuate (physics not stepping); scenario should have failed",
+            elapsed=elapsed,
+        )
 
     metrics = {
-        "torch_tip_distance_to_target_cm": round((palm - seam).GetLength() * 100, 2),
-        "collision_count": 1 if clearance < COLLISION_CLEARANCE_M else 0,
+        "torch_tip_distance_to_target_cm": tip_cm,
+        "collision_count": 1 if collision else 0,
         "restricted_zone_intrusions": 1 if intruded else 0,
-        "max_base_tilt_degrees": _base_tilt_deg(stage),
+        "max_base_tilt_degrees": tilt,
         "elapsed_seconds": elapsed,
         "min_clearance_to_obstacle_cm": round(clearance * 100, 2),
         "weld_point_xyz": [round(palm[0], 3), round(palm[1], 3), round(palm[2], 3)],
@@ -217,13 +297,31 @@ def behavior_ci_run_trial(args):
                 "message": f"G1 weld point {metrics['min_clearance_to_obstacle_cm']}cm from the obstacle",
             }
         )
-    if metrics["torch_tip_distance_to_target_cm"] > 2.0 and not events:
+    if elapsed >= 30:
+        events.append(
+            {
+                "run": run,
+                "time_seconds": elapsed,
+                "code": "TARGET_TIMEOUT",
+                "message": f"weld-approach did not reach the seam within the {elapsed}s budget",
+            }
+        )
+    if tip_cm > 2.0 and not events:
         events.append(
             {
                 "run": run,
                 "time_seconds": elapsed,
                 "code": "TARGET_MISS",
-                "message": f"weld tip {metrics['torch_tip_distance_to_target_cm']}cm from seam",
+                "message": f"weld tip {tip_cm}cm from seam",
+            }
+        )
+    if tilt > 5.0:
+        events.append(
+            {
+                "run": run,
+                "time_seconds": elapsed,
+                "code": "BASE_INSTABILITY",
+                "message": f"G1 base tilted {tilt} degrees during the approach",
             }
         )
     return {"metrics": metrics, "events": events, "trajectory_id": f"g1-run{run:02d}"}

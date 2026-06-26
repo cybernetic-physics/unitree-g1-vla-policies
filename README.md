@@ -61,18 +61,18 @@ Open `artifacts/behavior-ci/report/index.html` for the full report.
 
 | Adapter | What runs | Needs | Config |
 |---|---|---|---|
-| `isaac-session` (the CI gate) | A **real hosted Cybernetic Physics Isaac Sim session**: boots a blank session, spawns the **real Unitree G1**, uploads `isaac/behavior_ci_env.py` and builds + calibrates the scene at runtime, runs the weld-approach in physics, measures the metrics off the robot, and captures replay video from the pass/fail camera. | API key only | `cybernetic-behavior-ci.hosted.yaml` |
+| `isaac-session` (the CI gate) | A **real hosted Cybernetic Physics Isaac Sim session**: boots from the saved **`cicd`** environment (the **real Unitree G1** + welding scene), uploads `isaac/behavior_ci_env.py`, drives the weld-approach in physics for each scenario, measures the metrics off the robot, and captures replay video from the pass/fail camera. | API key only | `cybernetic-behavior-ci.hosted.yaml` |
 | `fixture` (local dev only) | Deterministic model from readable controller params — fast offline check while iterating. Not the CI behavior gate. | nothing | `cybernetic-behavior-ci.yaml` |
 
 The PR check (`.github/workflows/cybernetic-behavior-ci.yml`) runs the **real
 `isaac-session` validation**: it boots a hosted Isaac session, runs the changed
 policy on the G1, and turns the check red/green from the **measured** result.
 It needs just one secret — `CYBERNETICS_API_KEY` (in the `behavior-ci`
-Environment); base/MCP URLs default to hosted production and the scene is authored
-at runtime, so no env id is required. Present on this org's PRs; **fork PRs without
-the key skip the hosted job with a notice** (they don't fake a green behavior
-result). An offline `contract` job always runs to validate config/SDK wiring (not
-robot behavior).
+Environment); base/MCP URLs default to hosted production, and the scene is loaded
+from the saved `cicd` environment pinned in `cybernetic-behavior-ci.hosted.yaml`.
+Present on this org's PRs; **fork PRs without the key skip the hosted job with a
+notice** (they don't fake a green behavior result). An offline `contract` job
+always runs to validate config/SDK wiring (not robot behavior).
 Provenance is always explicit in `result.json` / `provenance.json`:
 
 - `simulator_adapter`: `fixture` | `isaac-session`
