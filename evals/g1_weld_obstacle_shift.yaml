@@ -11,7 +11,7 @@ checks:
   target_reach:
     metric: torch_tip_distance_to_target_cm
     operator: "<="
-    value: 99.0
+    value: 2.0
     required: true
   collision_free:
     metric: collision_count
