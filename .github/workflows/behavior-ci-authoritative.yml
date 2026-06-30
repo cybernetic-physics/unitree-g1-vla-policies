@@ -1,0 +1,105 @@
+name: Behavior CI — Authoritative
+
+# THE TRUST ANCHOR. Unlike the per-PR contract/hosted jobs (which run the candidate's own
+# workflow under a candidate-chosen SDK pin and are therefore EVIDENCE/UX only), this job's
+# verdict cannot be forged by a policy PR:
+#
+#   * pull_request_target runs THIS workflow from the protected BASE ref, so a PR cannot edit
+#     its logic, the SDK pin, or the env for its own run;
+#   * it checks out the CANONICAL task + config + SDK pin from the base commit, and overlays
+#     ONLY the PR's policies/*.pt (closed-schema JSON DATA — parsed, never executed);
+#   * it grades the PR's policy against the base's canonical task with the pure measure()
+#     (the drift-free verdict) and verify-task'd canonical lock.
+#
+# A PR that edits tasks/**, the eval, the lock, the SDK pin, or any workflow has ZERO effect
+# here — the judge is always the base's. Only the policy artifact is under test.
+#
+# ACTIVATION (inherent to pull_request_target): this workflow + tasks/** must be on the
+# repository's DEFAULT branch to run. Once merged, mark the "behavior-ci/authoritative" status
+# REQUIRED in branch protection (see the PR's post-merge steps) so merges are gated on it.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "policies/**"
+      - "tasks/**"
+      - "cybernetic-behavior-ci.yaml"
+      - "cybernetic-behavior-ci.hosted.yaml"
+
+# No write to contents; only the commit status. Crucially we NEVER run PR code.
+permissions:
+  contents: read
+  statuses: write
+
+env:
+  # Pinned by commit SHA on the cybernetic SDK; read from BASE (a PR cannot change it here).
+  CYBERNETICS_SDK_SPEC: "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@7c43d837ceef6c7e5d927b5af66852af8cfceb73"
+
+jobs:
+  authoritative:
+    name: behavior-ci/authoritative (canonical)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout CANONICAL base (task + config + SDK pin)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install pinned Cybernetics SDK
+        run: pip install "${CYBERNETICS_SDK_SPEC}"
+      - name: Overlay ONLY the PR's policy files (data, never code)
+        id: policy
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "refs/pull/${PR}/head:pr_head"
+          # Take ONLY policies/*.pt from the PR; tasks/ + config stay canonical (base).
+          git checkout pr_head -- policies/
+          changed="$(git diff --name-only "$BASE_SHA" pr_head -- 'policies/*.pt' | sort | tail -n 1 || true)"
+          [ -n "$changed" ] || changed="policies/g1_weld_approach_v21.pt"
+          echo "ref=$changed" >> "$GITHUB_OUTPUT"
+          echo "Authoritative policy under test: $changed (graded against canonical base task)"
+      - name: Verify canonical task integrity
+        run: |
+          cybernetics behavior-ci verify-task \
+            --config cybernetic-behavior-ci.yaml \
+            --policy-ref "${{ steps.policy.outputs.ref }}"
+      - name: Authoritative grade (canonical task, PR policy)
+        id: grade
+        shell: bash
+        run: |
+          set +e
+          cybernetics behavior-ci run \
+            --config cybernetic-behavior-ci.yaml \
+            --policy-ref "${{ steps.policy.outputs.ref }}" \
+            --eval obstacle_shift \
+            --out artifacts/authoritative
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+      - name: Post authoritative commit status
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const code = '${{ steps.grade.outputs.exit_code }}';
+            const state = code === '0' ? 'success' : 'failure';
+            const desc = code === '0' ? 'canonical grade: PASS'
+              : (code === '1' ? 'canonical grade: behavior regression'
+                 : `canonical grade: input/contract error (exit ${code})`);
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner, repo: context.repo.repo,
+              sha: context.payload.pull_request.head.sha,
+              context: 'behavior-ci/authoritative',
+              state, description: desc,
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
+      - name: Reflect the verdict in the job result
+        if: steps.grade.outputs.exit_code != '0'
+        run: |
+          echo "::error::Authoritative canonical grade failed (exit ${{ steps.grade.outputs.exit_code }})"
+          exit 1
