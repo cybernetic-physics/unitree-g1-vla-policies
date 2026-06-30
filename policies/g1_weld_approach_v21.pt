@@ -6,7 +6,13 @@
   "robot": "Unitree G1-compatible humanoid proxy",
   "backend": "scripted-vla-shim",
   "task": "g1_weld_approach",
-  "checkpoint": {"detour_mode":"relative","detour_gain":1.0,"clearance_margin_cm":12.0,"top_halfwidth_cm":30.0,"approach_speed_mps":0.12},
-  "expected_demo_result": "passed",
-  "notes": "Flagship: an obstacle-relative weld-approach. Passing is earned by emitting a trajectory the environment measures, not by declaring a number; it also clears the held-out perturbation bank."
+  "checkpoint": {
+    "detour_mode": "relative",
+    "detour_gain": 8.0,
+    "clearance_margin_cm": 12.0,
+    "top_halfwidth_cm": 30.0,
+    "approach_speed_mps": 0.12
+  },
+  "expected_demo_result": "failed",
+  "notes": "GAMING ATTEMPT: crank the detour huge to \"be safer\". Non-monotone measurement -> the wide swing busts base tilt and the time budget, and the truncated path misses the seam. Behavior CI turns red."
 }
