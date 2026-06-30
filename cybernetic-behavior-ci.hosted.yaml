@@ -21,3 +21,6 @@ policy_backends:
 evals:
   obstacle_shift:
     path: evals/g1_weld_obstacle_shift.yaml
+task_source:
+  kind: repo
+  dir: tasks
