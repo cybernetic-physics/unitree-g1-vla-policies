@@ -1,29 +1,23 @@
+# Offline fixture config (local dev + the secrets-free CI contract job).
+# The policy is a v2 manifest that names a pinned SDK Task Pack; the eval, scenario geometry,
+# grader, held-out bank and saved-scene env_id all come from that pack -- NOT from this repo.
+# This config only selects the adapter and output dir.
 schema_version: cybernetic-behavior-ci-config/v1
 project: unitree-g1-vla-policies
 robot: Unitree G1-compatible humanoid proxy
-
 artifacts:
   out: artifacts/behavior-ci
-  replay_source_dir: assets/isaac-replays
-  # Real Unitree G1 Isaac session captures are committed under replay_source_dir,
-  # so the default fixture check ships genuine replay video (not placeholders) and
-  # records replay_source=checked-in-demo-evidence. Captured live from a hosted
-  # rtx4090 session via the isaac-session adapter + isaac/behavior_ci_env.py.
-  require_replay_provenance: checked-in-demo-evidence
-
 simulator:
-  # Default adapter: fast, deterministic, no network, no secrets. Real physics-
-  # backed runs use the hosted `isaac-session` adapter (see the hosted config).
   adapter: fixture
-  base_url_env: CYBERNETICS_BASE_URL
   session:
     scene_env: behavior-ci-tabletop-welding
     camera: /World/Cameras/BehaviorCI_PassFailCamera
-
 policy_backends:
   scripted-vla-shim:
     type: scripted
-
+# evals/g1_weld_obstacle_shift.yaml is a VERIFIED READ-ONLY COPY of the pinned pack eval
+# (sha256 in the SDK task lock); editing it is rejected by `verify-task` (exit 4) and ignored
+# for grading. Kept here only for readability.
 evals:
   obstacle_shift:
     path: evals/g1_weld_obstacle_shift.yaml

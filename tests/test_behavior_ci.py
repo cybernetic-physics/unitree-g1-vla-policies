@@ -1,10 +1,11 @@
-"""Golden contract for the public showcase: v18 regresses, v19 passes.
+"""Golden + anti-gaming contract for the public showcase (v2 Task Pack).
 
-These run the installed Cybernetics SDK CLI (`cybernetics behavior-ci run`) over
-the repo's config/policies/eval — the same path CI uses — and assert the
-red/green story. Install the SDK first:
+These run the installed Cybernetics SDK CLI -- the same path CI uses -- and assert that the
+honest red/green story holds AND that gaming attempts are caught. Install the pinned SDK:
 
-    pip install "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@main"
+    pip install "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@<sha>"
+
+Exit codes: 0 pass, 1 behavior regression, 2 invalid/closed-schema input, 4 pin/contract.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ import pytest
 
 CLI = shutil.which("cybernetics")
 ROOT = Path(__file__).resolve().parents[1]
+CONFIG = "cybernetic-behavior-ci.yaml"
 
 pytestmark = pytest.mark.skipif(
     CLI is None,
@@ -32,7 +34,7 @@ def _run(policy_ref: str, out: Path) -> subprocess.CompletedProcess:
             "behavior-ci",
             "run",
             "--config",
-            "cybernetic-behavior-ci.yaml",
+            CONFIG,
             "--policy-ref",
             policy_ref,
             "--eval",
@@ -46,27 +48,84 @@ def _run(policy_ref: str, out: Path) -> subprocess.CompletedProcess:
     )
 
 
-def test_v18_fails_runs_3_5_7(tmp_path: Path) -> None:
-    out = tmp_path / "v18"
-    proc = _run("policies/g1_weld_approach_v18.pt", out)
+def _verify(policy_ref: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [
+            CLI,
+            "behavior-ci",
+            "verify-task",
+            "--config",
+            CONFIG,
+            "--policy-ref",
+            policy_ref,
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+
+# ----- golden: honest policies -----------------------------------------------------------
+def test_v18_regresses(tmp_path: Path):
+    proc = _run("policies/g1_weld_approach_v18.pt", tmp_path / "v18")
     assert proc.returncode == 1, proc.stderr
-    result = json.loads((out / "result.json").read_text())
-    assert result["schema_version"] == "behavior-ci/v1"
+    result = json.loads((tmp_path / "v18" / "result.json").read_text())
     assert result["status"] == "failed"
-    assert result["summary"]["passed_runs"] == 5
-    assert [f["run"] for f in result["failures"]] == [3, 5, 7]
-    assert [f["code"] for f in result["failures"]] == [
-        "SAFETY_ZONE_INTRUSION",
-        "OBSTACLE_COLLISION",
-        "TARGET_TIMEOUT",
-    ]
+    # 16 graded: the published 8 + the held-out perturbation bank.
+    assert result["summary"]["total_runs"] == 16
+    assert result["honesty"]["pins_verified"] is True
 
 
-def test_v19_passes_all_runs(tmp_path: Path) -> None:
-    out = tmp_path / "v19"
-    proc = _run("policies/g1_weld_approach_v19.pt", out)
+@pytest.mark.parametrize("pid", ["g1_weld_approach_v19", "g1_weld_approach_v21"])
+def test_honest_policy_passes(pid: str, tmp_path: Path):
+    proc = _run(f"policies/{pid}.pt", tmp_path / pid)
     assert proc.returncode == 0, proc.stderr
-    result = json.loads((out / "result.json").read_text())
-    assert result["status"] == "passed"
-    assert result["summary"]["passed_runs"] == 8
-    assert result["failures"] == []
+    assert (
+        json.loads((tmp_path / pid / "result.json").read_text())["status"] == "passed"
+    )
+
+
+def test_verify_task_passes_for_clean_repo():
+    assert _verify("policies/g1_weld_approach_v21.pt").returncode == 0
+
+
+# ----- anti-gaming: every cheap cheat turns the check red --------------------------------
+def test_crank_the_detour_is_non_monotone_red(tmp_path: Path):
+    """Cranking the detour does not "make it safer" -- it busts tilt/timeout. exit 1."""
+    base = json.loads((ROOT / "policies/g1_weld_approach_v21.pt").read_text())
+    base["checkpoint"] = dict(base["checkpoint"], detour_gain=8.0)
+    p = tmp_path / "crank.pt"
+    p.write_text(json.dumps(base))
+    assert _run(str(p), tmp_path / "out").returncode == 1
+
+
+def test_inflate_or_smuggle_key_rejected(tmp_path: Path):
+    """A smuggled capability key in the closed v2 manifest -> exit 2."""
+    base = json.loads((ROOT / "policies/g1_weld_approach_v21.pt").read_text())
+    base["session_entrypoint"] = "evil"
+    p = tmp_path / "smuggle.pt"
+    p.write_text(json.dumps(base))
+    assert _verify(str(p)).returncode == 2
+    assert _run(str(p), tmp_path / "out").returncode == 2
+
+
+def test_tampering_eval_copy_is_rejected(tmp_path: Path):
+    """Lowering the bar by editing the verified eval copy -> pin mismatch, exit 4."""
+    eval_path = ROOT / "evals/g1_weld_obstacle_shift.yaml"
+    original = eval_path.read_text()
+    try:
+        eval_path.write_text(original.replace("value: 2.0", "value: 99.0"))
+        assert _verify("policies/g1_weld_approach_v18.pt").returncode == 4
+    finally:
+        eval_path.write_text(original)
+
+
+def test_tampering_grader_copy_is_rejected(tmp_path: Path):
+    """Rewriting the verified grader copy -> pin mismatch, exit 4."""
+    grader_path = ROOT / "isaac/behavior_ci_env.py"
+    original = grader_path.read_text()
+    try:
+        grader_path.write_text(original + "\n# tamper\n")
+        assert _verify("policies/g1_weld_approach_v18.pt").returncode == 4
+    finally:
+        grader_path.write_text(original)

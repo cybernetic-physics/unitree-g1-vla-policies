@@ -1,13 +1,19 @@
 name: Cybernetic Behavior CI
 
-# The real behavior gate: validates a changed Unitree G1 policy by running it in
-# a hosted Cybernetic Physics Isaac Sim session (the `isaac-session` SDK adapter),
-# measuring the weld-approach off the real robot. There is no fixture/deterministic
-# pass-fail here — fixture mode exists only for local dev (cybernetic-behavior-ci.yaml).
+# Behavior CI with an ENFORCED trust boundary. A policy PR may change only its opaque
+# checkpoint (policies/*.pt). The judge -- eval thresholds, scenario geometry, action
+# contract, grader and saved-scene env_id -- lives in the pinned SDK Task Pack, not this repo.
 #
-# Org PRs (same-repo branches) have the `behavior-ci` Environment secrets, so the
-# real Isaac eval runs. Fork PRs don't receive secrets, so the hosted job skips
-# with a notice (it does not fake a green behavior result).
+#   * contract job (secrets-free, runs on every PR incl. forks): closed-schema + pin check via
+#     `verify-task`, then the fixture eval. A gaming attempt turns it RED:
+#       - inflate / smuggle a key in the .pt         -> exit 2 (closed v2 schema)
+#       - crank the detour to "be safer"             -> exit 1 (non-monotone measurement)
+#       - edit the eval/grader copy to lower the bar -> exit 4 (pin mismatch; edit is inert)
+#       - tune the checkpoint honestly               -> exit 0 (earned by a measured trajectory)
+#   * behavior-isaac job: the real G1 run on the saved scene (needs the platform API key).
+#     The AUTHORITATIVE verdict must be a platform-posted check (see POST-MERGE in the PR).
+#
+# The SDK is pinned by COMMIT SHA (not @main) so the judge cannot move under a PR.
 
 on:
   pull_request:
@@ -20,12 +26,6 @@ on:
       - "cybernetic-behavior-ci.hosted.yaml"
       - ".github/workflows/cybernetic-behavior-ci.yml"
   workflow_dispatch:
-    inputs:
-      policy_ref:
-        description: Policy manifest path under policies/*.pt
-        required: false
-        default: policies/g1_weld_approach_v18.pt
-        type: string
 
 permissions:
   contents: read
@@ -33,34 +33,77 @@ permissions:
   checks: write
 
 env:
-  CYBERNETICS_SDK_SPEC: "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@main"
+  # Pinned by commit SHA on the cybernetic SDK (PR cybernetic-physics/cybernetic#10).
+  CYBERNETICS_SDK_SPEC: "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@be45525d5051e6f1d82036f2ce0e014243a19490"
 
 jobs:
   contract:
-    name: SDK + config contract (offline)
+    name: Behavior CI — integrity + fixture (offline, no secrets)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install Cybernetics SDK
+      - name: Install pinned Cybernetics SDK
         run: pip install "${CYBERNETICS_SDK_SPEC}"
-      - name: Validate configs (does not validate robot behavior)
+
+      - name: Resolve changed policy
+        id: policy
+        shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          ref=""
+          if [ -n "${BASE_REF:-}" ]; then
+            git fetch --no-tags --depth=1 origin "$BASE_REF" || true
+            ref="$(git diff --name-only "origin/$BASE_REF...HEAD" -- 'policies/*.pt' | sort | tail -n 1 || true)"
+          fi
+          [ -n "$ref" ] || ref="policies/g1_weld_approach_v21.pt"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "Changed policy: $ref"
+
+      - name: Validate configs
         run: |
           set -euo pipefail
           cybernetics behavior-ci validate-config --config cybernetic-behavior-ci.yaml
           cybernetics behavior-ci validate-config --config cybernetic-behavior-ci.hosted.yaml
 
+      - name: Integrity gate (closed schema + pinned eval/grader)
+        run: |
+          cybernetics behavior-ci verify-task \
+            --config cybernetic-behavior-ci.yaml \
+            --policy-ref "${{ steps.policy.outputs.ref }}"
+
+      - name: Behavior (fixture eval — visible + held-out)
+        run: |
+          cybernetics behavior-ci run \
+            --config cybernetic-behavior-ci.yaml \
+            --policy-ref "${{ steps.policy.outputs.ref }}" \
+            --eval obstacle_shift \
+            --out artifacts/behavior-ci
+
+      - name: Upload artifact bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: behavior-ci-fixture
+          path: artifacts/behavior-ci
+          if-no-files-found: warn
+
   behavior-isaac:
     name: Behavior CI — real hosted Isaac (Unitree G1)
     runs-on: ubuntu-latest
     needs: contract
+    # Dispatch-only until the hosted grader's per-scenario placement + actuation is
+    # smoke-tested on a live GPU session (see the PR's post-merge steps). The secrets-free
+    # `contract` job above -- which uses the IDENTICAL measurement -- is the PR gate.
+    if: github.event_name == 'workflow_dispatch'
     environment: behavior-ci
     env:
-      # Only the API key is a secret. Base/MCP URLs default to hosted production
-      # in the SDK, and the scene is authored at runtime — so no env id, URLs, or
-      # workspace are needed. (CYBERNETICS_MCP_API_KEY only if the gateway key differs.)
       CYBERNETICS_API_KEY: ${{ secrets.CYBERNETICS_API_KEY }}
       CYBERNETICS_MCP_API_KEY: ${{ secrets.CYBERNETICS_MCP_API_KEY }}
     steps:
@@ -70,94 +113,36 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install Cybernetics SDK
-        run: pip install "${CYBERNETICS_SDK_SPEC}"
-
       - name: Gate on platform credentials
         id: gate
         shell: bash
         run: |
-          set -euo pipefail
           if [ -z "${CYBERNETICS_API_KEY:-}" ]; then
-            echo "::notice::Hosted Isaac validation skipped — no CYBERNETICS_API_KEY on this repo or fork. The Cybernetic Physics org CI runs the real Unitree G1 eval; sign up to run it on your own robot."
+            echo "::notice::Hosted Isaac validation skipped — no CYBERNETICS_API_KEY (fork or unset). This posts NEUTRAL, not success; the authoritative verdict is the platform-posted check."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Resolve policy ref
+      - name: Install pinned Cybernetics SDK
+        if: steps.gate.outputs.skip == 'false'
+        run: pip install "${CYBERNETICS_SDK_SPEC}"
+      - name: Resolve changed policy
         if: steps.gate.outputs.skip == 'false'
         id: policy
         shell: bash
         env:
-          INPUT_POLICY_REF: ${{ github.event.inputs.policy_ref }}
           BASE_REF: ${{ github.base_ref }}
-          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          policy_ref="${INPUT_POLICY_REF:-}"
-          if [ -z "$policy_ref" ] && [ "$EVENT_NAME" = "pull_request" ]; then
-            git fetch --no-tags --depth=1 origin "$BASE_REF"
-            policy_ref="$(git diff --name-only "origin/$BASE_REF"...HEAD -- 'policies/*.pt' | sort | tail -n 1)"
-          fi
-          [ -n "$policy_ref" ] || policy_ref="policies/g1_weld_approach_v19.pt"
-          case "$policy_ref" in policies/*.pt) ;; *) echo "::error::policy ref must be policies/*.pt"; exit 2 ;; esac
-          echo "policy_ref=$policy_ref" >> "$GITHUB_OUTPUT"
-          echo "Resolved policy: $policy_ref"
-
+          git fetch --no-tags --depth=1 origin "$BASE_REF" || true
+          ref="$(git diff --name-only "origin/$BASE_REF...HEAD" -- 'policies/*.pt' | sort | tail -n 1 || true)"
+          [ -n "$ref" ] || ref="policies/g1_weld_approach_v21.pt"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
       - name: Run Behavior CI on the real G1
         if: steps.gate.outputs.skip == 'false'
-        id: run
-        shell: bash
         run: |
-          set +e
           cybernetics behavior-ci run \
             --config cybernetic-behavior-ci.hosted.yaml \
-            --policy-ref "${{ steps.policy.outputs.policy_ref }}" \
+            --policy-ref "${{ steps.policy.outputs.ref }}" \
             --eval obstacle_shift \
-            --out artifacts/behavior-ci
-          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
-
-      - name: Upload artifact bundle
-        if: steps.gate.outputs.skip == 'false' && always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: behavior-ci-artifacts
-          path: artifacts/behavior-ci
-          if-no-files-found: warn
-
-      - name: Upsert PR comment
-        if: steps.gate.outputs.skip == 'false' && always() && github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const path = 'artifacts/behavior-ci/comment.md';
-            if (!fs.existsSync(path)) { core.warning('no comment.md produced'); return; }
-            const marker = '<!-- cybernetic-behavior-ci -->';
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const body = fs.readFileSync(path, 'utf8') + `\n\nArtifacts: [behavior-ci-artifacts](${runUrl})`;
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, per_page: 100,
-            });
-            const existing = comments.find(c => c.body && c.body.includes(marker));
-            if (existing) {
-              await github.rest.issues.updateComment({ owner: context.repo.owner, repo: context.repo.repo, comment_id: existing.id, body });
-            } else {
-              await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body });
-            }
-
-      - name: Finalize result
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ "${{ steps.gate.outputs.skip }}" = "true" ]; then
-            echo "Hosted Isaac validation skipped (no credentials); not a behavior pass."
-            exit 0
-          fi
-          code="${{ steps.run.outputs.exit_code }}"
-          case "$code" in
-            0) echo "G1 behavior passed" ;;
-            1) echo "::error::Unitree G1 behavior regression"; exit 1 ;;
-            *) echo "::error::hosted behavior CI failed (exit $code)"; exit "$code" ;;
-          esac
+            --out artifacts/behavior-ci-hosted

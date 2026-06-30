@@ -1,0 +1,8 @@
+# The JUDGE and the GATE must not move under a policy PR. A policy contributor changes only
+# policies/*.pt; everything that decides pass/fail requires task-author / platform review.
+# Enable branch protection with "Require review from Code Owners" for this to be enforced.
+.github/**                            @G-structure
+/cybernetic-behavior-ci.yaml          @G-structure
+/cybernetic-behavior-ci.hosted.yaml   @G-structure
+/evals/**                             @G-structure
+/isaac/**                             @G-structure
