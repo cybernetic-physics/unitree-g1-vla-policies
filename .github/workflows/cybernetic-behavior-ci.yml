@@ -98,9 +98,12 @@ jobs:
 
   behavior-isaac:
     name: Behavior CI — real hosted Isaac (Unitree G1)
+    # Runs on EVERY commit independent of the offline contract gate, so every commit gets a
+    # replay-video comment — green when the policy solves the task, RED (with the failed-clip
+    # GIF) when it regresses. (The fast contract job remains the cheap authoritative gate; this
+    # job's own exit code still turns its check red/green.)
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
-    needs: contract
     environment: behavior-ci
     # contents: write only to publish the replay GIF to the orphan ci-media branch.
     permissions:
