@@ -40,7 +40,7 @@ permissions:
 
 env:
   # Pinned by commit SHA on the cybernetic SDK (PR cybernetic-physics/cybernetic#10).
-  CYBERNETICS_SDK_SPEC: "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@9396cfeba7761a62964bb4a120a9fe7ec5f39187"
+  CYBERNETICS_SDK_SPEC: "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@a555f0ef5dd034d616074244738a26eaeb2ac57e"
 
 jobs:
   contract:
