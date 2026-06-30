@@ -8,11 +8,11 @@
   "task": "g1_weld_approach",
   "checkpoint": {
     "detour_mode": "relative",
-    "detour_gain": 8.0,
+    "detour_gain": 1.0,
     "clearance_margin_cm": 12.0,
     "top_halfwidth_cm": 30.0,
     "approach_speed_mps": 0.12
   },
-  "expected_demo_result": "failed",
-  "notes": "GAMING ATTEMPT (with video): crank the detour to be \"safer\". Non-monotone -> the real G1 over-swings, busting tilt/timeout; the hosted run captures the failing pose and the comment shows a RED verdict + failed-clip replay GIF."
+  "expected_demo_result": "passed",
+  "notes": "Honest obstacle-relative weld-approach (crank reverted). Solves every visible + held-out scenario; the hosted G1 run captures a clean weld and the per-commit comment shows a GREEN verdict + passing replay GIF."
 }
