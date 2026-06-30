@@ -190,28 +190,27 @@ jobs:
             const url = `https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/${branch}/${path}`;
             core.setOutput('gif_url', url);
             core.info(`published ${url}`);
-      - name: Verify GIF is inline-capable
-        id: verify
+      - name: Warm replay GIF (raw.githubusercontent propagation)
+        # Advisory only — the Publish step already confirmed the upload, so the comment uses
+        # the URL regardless; this just pre-fetches so the image is warm in camo when viewed.
+        # Never blocks/fails (raw can lag a few seconds after the Contents API write).
         if: steps.gate.outputs.skip == 'false' && steps.media.outputs.gif_url != ''
         continue-on-error: true
         shell: bash
         run: |
           url="${{ steps.media.outputs.gif_url }}"
-          ok=false
-          for i in $(seq 1 6); do
-            read -r code ct size < <(curl -sSL -o /dev/null -w '%{http_code} %{content_type} %{size_download}' "$url" || echo "000 - 0")
-            if [ "$code" = "200" ] && printf '%s' "$ct" | grep -qi 'image/gif' && [ "${size:-0}" -lt 5000000 ]; then
-              ok=true; echo "verified $url ($size bytes)"; break
-            fi
-            sleep 3
+          for i in $(seq 1 10); do
+            code="$(curl -sSL -o /dev/null -w '%{http_code}' "$url" || echo 000)"
+            echo "warm attempt $i: $code"
+            [ "$code" = "200" ] && break
+            sleep 4
           done
-          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+          exit 0
       - name: Render comment body
         if: steps.gate.outputs.skip == 'false' && always()
         shell: bash
         run: |
-          url=""
-          if [ "${{ steps.verify.outputs.ok }}" = "true" ]; then url="${{ steps.media.outputs.gif_url }}"; fi
+          url="${{ steps.media.outputs.gif_url }}"
           if [ -f artifacts/behavior-ci-hosted/comment.md ]; then
             if [ -n "$url" ]; then
               cybernetics behavior-ci render-comment --artifact-dir artifacts/behavior-ci-hosted --replay-gif-url "$url" > body.md
