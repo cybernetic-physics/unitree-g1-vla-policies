@@ -31,7 +31,7 @@ The candidate repo cannot reach those bytes. The `evals/` and `isaac/` files her
 **verified read-only copies** (their sha256 is pinned in the SDK lock); editing them is
 rejected, not honored.
 
-## Why it can't be gamed
+## Reward Hacking?
 
 The policy **emits a trajectory**; the environment **measures it independently**. There is no
 number the grader trusts. So the obvious cheats all turn the check **red**:
@@ -50,7 +50,7 @@ The one move that earns a green check is the one we want: a policy that actually
 torch around the *observed* obstacle, within the time and stability budget, on every scenario
 including the held-out ones.
 
-## The demo story (this PR)
+## Demo story [PR 12](https://github.com/cybernetic-physics/unitree-g1-vla-policies/pull/12)
 
 | Commit | Change | Check |
 |---|---|---|
