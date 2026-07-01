@@ -1,123 +1,96 @@
 # Unitree G1 VLA Policies — Cybernetic Physics Behavior CI
 
-**CodeRabbit reviews whether the code looks right. Cybernetic Physics reviews whether the robot still works.**
+**CodeRabbit reviews whether the code looks right. Cybernetic Physics reviews whether the robot still works — in a way you can't game.**
 
-This is a public, runnable showcase of **Behavior CI**: a GitHub-native check that
-runs a changed robot policy through a pinned simulation eval and returns a
-red/green verdict, metrics, and replay evidence on the pull request — the way a
-code linter reviews a diff, but for *robot behavior*.
+This is a public, runnable showcase of **Behavior CI**: a GitHub-native check that runs a
+changed robot policy through a *pinned* simulation eval and returns a red/green verdict,
+metrics, and replay evidence on the pull request — a linter, but for *robot behavior*.
 
-A developer opens a PR that changes a Unitree G1 weld-approach policy. Cybernetic
-Physics runs the obstacle-shift suite, and the PR gets:
+The point of this repo is the **trust boundary**. When you let an agent iterate on a policy
+to make CI green, the eval has to be something the agent *cannot* simply edit or self-report
+its way past. Here it isn't.
 
-- a **pass/fail check** (red if the robot regressed, green if it works),
-- a **sticky PR comment** with per-check results and metrics,
-- an **artifact bundle**: a static HTML report + replay video from a fixed
-  pass/fail camera.
+## The boundary: a policy changes only its checkpoint
 
-## The demo story
+A policy is a `policies/*.pt` file — a closed **v2 manifest** that carries only an opaque
+`checkpoint` and the name of a pinned **task**:
 
-| Policy | Change | Result |
+```json
+{ "schema_version": "behavior-ci-policy/v2", "policy_id": "g1_weld_approach_v21",
+  "behavior": "g1_weld_approach", "backend": "scripted-vla-shim",
+  "task": "g1_weld_approach",
+  "checkpoint": { "detour_mode": "relative", "detour_gain": 1.0, "clearance_margin_cm": 12.0,
+                  "top_halfwidth_cm": 30.0, "approach_speed_mps": 0.12 } }
+```
+
+Everything that *decides pass/fail* — the eval thresholds, the scenario geometry, the
+action/observation contract, the outcome measurement, the in-session grader, the held-out
+perturbation bank, and the saved Isaac scene `env_id` — lives in a **Task Pack inside the
+installed SDK** (`cybernetics/behavior_ci/tasks/g1_weld_approach/`), pinned by commit SHA.
+The candidate repo cannot reach those bytes. The `evals/` and `isaac/` files here are
+**verified read-only copies** (their sha256 is pinned in the SDK lock); editing them is
+rejected, not honored.
+
+## Why it can't be gamed
+
+The policy **emits a trajectory**; the environment **measures it independently**. There is no
+number the grader trusts. So the obvious cheats all turn the check **red**:
+
+| Gaming attempt | Result |
+|---|---|
+| Inflate / self-report a "clearance" number | nothing reads it as truth; the trajectory is measured (and a too-big detour *fails* — see below) |
+| Smuggle a `session_entrypoint` (pick your own grader) | ❌ **exit 2** — closed v2 schema rejects unknown keys |
+| **Crank the detour** to "be safer" | ❌ **exit 1** — measurement is **non-monotone**: too small collides/intrudes, too large busts tilt/timeout and hits a ceiling zone |
+| Memorize the 8 visible scenarios | ❌ — the **held-out perturbation bank** (shipped only in the SDK) fails a non-obstacle-relative policy |
+| Lower a threshold in `evals/…yaml` | ❌ **exit 4** — sha256 pin mismatch; the edit is also *inert* (grading uses the pinned pack) |
+| Rewrite the grader in `isaac/…py` | ❌ **exit 4** — sha256 pin mismatch |
+| Tune the checkpoint into an honest obstacle-relative trajectory | ✅ **exit 0** — earned |
+
+The one move that earns a green check is the one we want: a policy that actually routes the
+torch around the *observed* obstacle, within the time and stability budget, on every scenario
+including the held-out ones.
+
+## The demo story (this PR)
+
+| Commit | Change | Check |
 |---|---|---|
-| `policies/g1_weld_approach_v18.pt` | clearance margin too small, no online replan | ❌ **fails** 3/8 trials — restricted-zone intrusion, obstacle collision, timeout |
-| `policies/g1_weld_approach_v19.pt` | obstacle-shift augmentation + replan restored | ✅ **passes** 8/8 trials |
+| crank | `detour_gain` 1.0 → 8.0 ("bigger detour must be safer") | ❌ red (timeout + target miss) |
+| lower the bar | edit the verified `evals/…yaml` threshold | ❌ red (pin mismatch, exit 4) |
+| honest fix | revert tampering, keep the obstacle-relative `v21` checkpoint | ✅ green (16/16: visible + held-out) |
 
-The difference is a **readable controller parameter** (`clearance_margin_cm`: 6 → 14),
-not a hidden flag. A trial fails its stressed check exactly when the controller's
-clearance margin is smaller than that scenario's `required_clearance_cm`
-(see `evals/g1_weld_obstacle_shift.yaml`).
-
-## Run it
-
-Install the SDK (provides the `cybernetics behavior-ci` runner):
-
-```bash
-pip install "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@main"
-```
-
-Run the regressed policy (exits non-zero — behavior regression):
-
-```bash
-cybernetics behavior-ci run \
-  --config cybernetic-behavior-ci.yaml \
-  --policy-ref policies/g1_weld_approach_v18.pt \
-  --eval obstacle_shift \
-  --out artifacts/behavior-ci
-```
-
-Run the fixed policy (exits zero):
-
-```bash
-cybernetics behavior-ci run \
-  --config cybernetic-behavior-ci.yaml \
-  --policy-ref policies/g1_weld_approach_v19.pt \
-  --eval obstacle_shift \
-  --out artifacts/behavior-ci
-```
-
-Open `artifacts/behavior-ci/report/index.html` for the full report.
+All of this is visible in the **secrets-free `contract` job**, so anyone — including a fork —
+can see the gate work without a hosted session.
 
 ## Two backends
 
-| Adapter | What runs | Needs | Config |
-|---|---|---|---|
-| `isaac-session` (the CI gate) | A **real hosted Cybernetic Physics Isaac Sim session**: boots from the saved **`cicd`** environment (the **real Unitree G1** + welding scene), uploads `isaac/behavior_ci_env.py`, drives the weld-approach in physics for each scenario, measures the metrics off the robot, and captures replay video from the pass/fail camera. | API key only | `cybernetic-behavior-ci.hosted.yaml` |
-| `fixture` (local dev only) | Deterministic model from readable controller params — fast offline check while iterating. Not the CI behavior gate. | nothing | `cybernetic-behavior-ci.yaml` |
+| Adapter | What runs | Needs |
+|---|---|---|
+| `fixture` (the offline gate) | Pure, deterministic geometric measurement of the emitted trajectory over the visible + held-out scenarios. Runs on every PR/fork. | nothing |
+| `isaac-session` (the hosted gate) | Boots a hosted Isaac session, loads the pinned saved scene, actuates the real G1 along the emitted trajectory, and captures replay video. Grades with the **same** measurement (no drift). | platform API key |
 
-The PR check (`.github/workflows/cybernetic-behavior-ci.yml`) runs the **real
-`isaac-session` validation**: it boots a hosted Isaac session, runs the changed
-policy on the G1, and turns the check red/green from the **measured** result.
-It needs just one secret — `CYBERNETICS_API_KEY` (in the `behavior-ci`
-Environment); base/MCP URLs default to hosted production, and the scene is loaded
-from the saved `cicd` environment pinned in `cybernetic-behavior-ci.hosted.yaml`.
-Present on this org's PRs; **fork PRs without the key skip the hosted job with a
-notice** (they don't fake a green behavior result). An offline `contract` job
-always runs to validate config/SDK wiring (not robot behavior).
-Provenance is always explicit in `result.json` / `provenance.json`:
+> **Authoritative verdict.** A candidate can edit their own workflow YAML or SDK pin, so the
+> offline job is *necessary but not sufficient*. The binding check must be **posted by
+> platform infrastructure** (a server-side run the candidate can't forge), required by branch
+> protection. See the PR's post-merge steps.
 
-- `simulator_adapter`: `fixture` | `isaac-session`
-- `replay_source`: `fixture-generated` | `checked-in-demo-evidence` | `isaac-sim-session-video`
-- `policy_backend_real_vla`: `false` for the scripted demo controller
+## Honesty
 
-> **Honesty:** the visible `.pt` files are JSON policy manifests for this showcase,
-> resolved by the `scripted-vla-shim` backend. This is a behavior-CI *workflow*
-> demo on a welding-themed scene — not a real learned VLA and not a
-> process-accurate welding simulation. Wiring a real VLA/GR00T checkpoint is a
-> documented next step (the `PolicyBackend` interface already exists in the SDK).
+The `.pt` files are JSON manifests resolved by a `scripted-vla-shim` planner — **not** a
+learned VLA, and the fixture is a kinematic model, not process-accurate welding. Provenance is
+always explicit in `result.json` (`policy_backend_real_vla: false`, `pins_verified`, the task
+digest, `simulator_adapter`, `replay_source`). Wiring a real VLA/GR00T checkpoint is a
+documented next step: the `act(observation) -> trajectory` + `measure` contract stays the same.
 
-## Bring your own behavior
+## Run it
 
-To point Behavior CI at *your* robot and task, you provide:
+```bash
+pip install "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@<pinned-sha>"
 
-1. **a policy / checkpoint** — a manifest under `policies/` (and, later, a real
-   backend that loads your weights),
-2. **a scene module** — an `isaac/behavior_ci_env.py` with `setup_scene()` that
-   builds your scene + a fixed pass/fail camera (or a pre-published `env_id` to
-   warm-start from),
-3. **success metrics** — the checks in an eval YAML (`evals/*.yaml`),
-4. **replay requirements** — which camera, and whether real Isaac capture is
-   required.
+# honest policy -> exit 0
+cybernetics behavior-ci run --config cybernetic-behavior-ci.yaml \
+  --policy-ref policies/g1_weld_approach_v21.pt --eval obstacle_shift --out artifacts/behavior-ci
 
-Everything is declared in `cybernetic-behavior-ci.yaml`; the SDK and a thin
-GitHub workflow do the rest.
-
-### Persona-style pilot
-
-Give us **one** non-sensitive behavior (or a simplified analogue) — a policy, a
-scene, and what "still works" means — and we return a PR check with metrics and
-replay evidence on that behavior. You can run it three ways: build it internally
-on the SDK, run it on our hosted platform, or co-develop a pilot.
-
-## Layout
-
-```
-cybernetic-behavior-ci.hosted.yaml   hosted Isaac config (the CI gate)
-cybernetic-behavior-ci.yaml          fixture config (local dev only)
-policies/                            v18 (regressed) / v19 (fixed) manifests
-evals/g1_weld_obstacle_shift.yaml    checks + per-trial obstacle-shift scenarios
-isaac/behavior_ci_env.py             in-session entrypoint run on the real G1
-configs/tasks/tabletop_welding.yaml  scene/task description
-assets/isaac-replays/                real Unitree G1 Isaac replay clips
-.github/workflows/                    real hosted-Isaac PR gate + offline contract job
-tests/test_behavior_ci.py            golden v18-fails / v19-passes contract
+# integrity gate (closed schema + pinned eval/grader)
+cybernetics behavior-ci verify-task --config cybernetic-behavior-ci.yaml \
+  --policy-ref policies/g1_weld_approach_v21.pt
 ```

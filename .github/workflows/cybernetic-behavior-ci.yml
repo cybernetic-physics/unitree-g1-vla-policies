@@ -1,16 +1,23 @@
 name: Cybernetic Behavior CI
 
-# The real behavior gate: validates a changed Unitree G1 policy by running it in
-# a hosted Cybernetic Physics Isaac Sim session (the `isaac-session` SDK adapter),
-# measuring the weld-approach off the real robot. There is no fixture/deterministic
-# pass-fail here — fixture mode exists only for local dev (cybernetic-behavior-ci.yaml).
+# Behavior CI with an ENFORCED trust boundary + a per-commit replay comment.
+# A policy PR may change only its opaque checkpoint (policies/*.pt). The judge -- eval
+# thresholds, scenario geometry, action contract, grader and saved-scene env_id -- lives in
+# the pinned SDK Task Pack, not this repo.
 #
-# Org PRs (same-repo branches) have the `behavior-ci` Environment secrets, so the
-# real Isaac eval runs. Fork PRs don't receive secrets, so the hosted job skips
-# with a notice (it does not fake a green behavior result).
+#   * contract job (secrets-free, every PR incl. forks): closed-schema + pin check via
+#     verify-task, then the fixture eval. Gaming attempts -> red (exit 1/2/4).
+#   * behavior-isaac job (per commit, needs the platform API key): runs the policy on the real
+#     G1 in the saved scene, captures replay video, and posts a NEW PR comment per commit with
+#     the real Isaac behavior as an INLINE animated GIF + verdict + metrics (red->green
+#     history). Degrades gracefully (still comments) if the GPU run / transcode / publish fails;
+#     fork PRs (no secrets, read-only token) get only the contract job.
+#
+# The SDK is pinned by COMMIT SHA (not @main) so the judge cannot move under a PR.
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, closed]
     paths:
       - "policies/**"
       - "configs/**"
@@ -20,12 +27,11 @@ on:
       - "cybernetic-behavior-ci.hosted.yaml"
       - ".github/workflows/cybernetic-behavior-ci.yml"
   workflow_dispatch:
-    inputs:
-      policy_ref:
-        description: Policy manifest path under policies/*.pt
-        required: false
-        default: policies/g1_weld_approach_v18.pt
-        type: string
+
+# Bound per-commit GPU cost: a newer push to the same PR cancels the in-flight hosted run.
+concurrency:
+  group: behavior-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -33,34 +39,77 @@ permissions:
   checks: write
 
 env:
-  CYBERNETICS_SDK_SPEC: "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@main"
+  # Pinned by commit SHA on the cybernetic SDK (PR cybernetic-physics/cybernetic#10).
+  CYBERNETICS_SDK_SPEC: "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@656b9085c53cd14e0ea43c7868fa0f71a5a7c119"
 
 jobs:
   contract:
-    name: SDK + config contract (offline)
+    name: Behavior CI — integrity + fixture (offline, no secrets)
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install Cybernetics SDK
+      - name: Install pinned Cybernetics SDK
         run: pip install "${CYBERNETICS_SDK_SPEC}"
-      - name: Validate configs (does not validate robot behavior)
+      - name: Resolve changed policy
+        id: policy
+        shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          ref=""
+          if [ -n "${BASE_REF:-}" ]; then
+            git fetch --no-tags --depth=1 origin "$BASE_REF" || true
+            ref="$(git diff --name-only "origin/$BASE_REF...HEAD" -- 'policies/*.pt' | sort | tail -n 1 || true)"
+          fi
+          [ -n "$ref" ] || ref="policies/g1_weld_approach_v21.pt"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "Changed policy: $ref"
+      - name: Validate configs
         run: |
           set -euo pipefail
           cybernetics behavior-ci validate-config --config cybernetic-behavior-ci.yaml
           cybernetics behavior-ci validate-config --config cybernetic-behavior-ci.hosted.yaml
+      - name: Integrity gate (closed schema + pinned eval/grader)
+        run: |
+          cybernetics behavior-ci verify-task \
+            --config cybernetic-behavior-ci.yaml \
+            --policy-ref "${{ steps.policy.outputs.ref }}"
+      - name: Behavior (fixture eval — visible + held-out)
+        run: |
+          cybernetics behavior-ci run \
+            --config cybernetic-behavior-ci.yaml \
+            --policy-ref "${{ steps.policy.outputs.ref }}" \
+            --eval obstacle_shift \
+            --out artifacts/behavior-ci
+      - name: Upload artifact bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: behavior-ci-fixture
+          path: artifacts/behavior-ci
+          if-no-files-found: warn
 
   behavior-isaac:
     name: Behavior CI — real hosted Isaac (Unitree G1)
+    # Runs on EVERY commit independent of the offline contract gate, so every commit gets a
+    # replay-video comment — green when the policy solves the task, RED (with the failed-clip
+    # GIF) when it regresses. (The fast contract job remains the cheap authoritative gate; this
+    # job's own exit code still turns its check red/green.)
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
-    needs: contract
     environment: behavior-ci
+    # contents: write only to publish the replay GIF to the orphan ci-media branch.
+    permissions:
+      contents: write
+      pull-requests: write
     env:
-      # Only the API key is a secret. Base/MCP URLs default to hosted production
-      # in the SDK, and the scene is authored at runtime — so no env id, URLs, or
-      # workspace are needed. (CYBERNETICS_MCP_API_KEY only if the gateway key differs.)
       CYBERNETICS_API_KEY: ${{ secrets.CYBERNETICS_API_KEY }}
       CYBERNETICS_MCP_API_KEY: ${{ secrets.CYBERNETICS_MCP_API_KEY }}
     steps:
@@ -70,73 +119,124 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install Cybernetics SDK
-        run: pip install "${CYBERNETICS_SDK_SPEC}"
-
       - name: Gate on platform credentials
         id: gate
         shell: bash
         run: |
-          set -euo pipefail
           if [ -z "${CYBERNETICS_API_KEY:-}" ]; then
-            echo "::notice::Hosted Isaac validation skipped — no CYBERNETICS_API_KEY on this repo or fork. The Cybernetic Physics org CI runs the real Unitree G1 eval; sign up to run it on your own robot."
+            echo "::notice::Hosted Isaac validation skipped — no CYBERNETICS_API_KEY (fork or unset). The contract job is the gate; the authoritative verdict is the platform-posted check."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Resolve policy ref
+      - name: Install pinned Cybernetics SDK
+        if: steps.gate.outputs.skip == 'false'
+        run: pip install "${CYBERNETICS_SDK_SPEC}"
+      - name: Resolve changed policy
         if: steps.gate.outputs.skip == 'false'
         id: policy
         shell: bash
         env:
-          INPUT_POLICY_REF: ${{ github.event.inputs.policy_ref }}
           BASE_REF: ${{ github.base_ref }}
-          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          policy_ref="${INPUT_POLICY_REF:-}"
-          if [ -z "$policy_ref" ] && [ "$EVENT_NAME" = "pull_request" ]; then
-            git fetch --no-tags --depth=1 origin "$BASE_REF"
-            policy_ref="$(git diff --name-only "origin/$BASE_REF"...HEAD -- 'policies/*.pt' | sort | tail -n 1)"
-          fi
-          [ -n "$policy_ref" ] || policy_ref="policies/g1_weld_approach_v19.pt"
-          case "$policy_ref" in policies/*.pt) ;; *) echo "::error::policy ref must be policies/*.pt"; exit 2 ;; esac
-          echo "policy_ref=$policy_ref" >> "$GITHUB_OUTPUT"
-          echo "Resolved policy: $policy_ref"
-
+          git fetch --no-tags --depth=1 origin "$BASE_REF" || true
+          ref="$(git diff --name-only "origin/$BASE_REF...HEAD" -- 'policies/*.pt' | sort | tail -n 1 || true)"
+          [ -n "$ref" ] || ref="policies/g1_weld_approach_v21.pt"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
       - name: Run Behavior CI on the real G1
-        if: steps.gate.outputs.skip == 'false'
         id: run
+        if: steps.gate.outputs.skip == 'false'
         shell: bash
         run: |
           set +e
           cybernetics behavior-ci run \
             --config cybernetic-behavior-ci.hosted.yaml \
-            --policy-ref "${{ steps.policy.outputs.policy_ref }}" \
+            --policy-ref "${{ steps.policy.outputs.ref }}" \
             --eval obstacle_shift \
-            --out artifacts/behavior-ci
+            --out artifacts/behavior-ci-hosted
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
-
       - name: Upload artifact bundle
         if: steps.gate.outputs.skip == 'false' && always()
         uses: actions/upload-artifact@v4
         with:
-          name: behavior-ci-artifacts
-          path: artifacts/behavior-ci
+          name: behavior-ci-hosted
+          path: artifacts/behavior-ci-hosted
           if-no-files-found: warn
-
-      - name: Upsert PR comment
+      - name: Publish replay GIF to ci-media
+        id: media
+        if: steps.gate.outputs.skip == 'false' && always()
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const dir = 'artifacts/behavior-ci-hosted/replays';
+            const cand = ['replay-failed.gif', 'replay-passed.gif'].map(n => `${dir}/${n}`);
+            const pick = cand.find(p => fs.existsSync(p));
+            if (!pick) { core.info('no replay GIF produced; skipping publish'); return; }
+            const content = fs.readFileSync(pick).toString('base64');
+            const sha = context.payload.pull_request.head.sha;
+            const pr = context.payload.pull_request.number;
+            const branch = 'ci-media';
+            const path = `behavior-ci/pr-${pr}/${sha}.gif`;
+            let existing;
+            try {
+              const got = await github.rest.repos.getContent({ owner: context.repo.owner, repo: context.repo.repo, path, ref: branch });
+              existing = got.data.sha;
+            } catch (e) { /* first time for this sha */ }
+            await github.rest.repos.createOrUpdateFileContents({
+              owner: context.repo.owner, repo: context.repo.repo, path, branch,
+              message: `behavior-ci: replay ${sha.slice(0,7)} (pr-${pr})`,
+              content, sha: existing,
+            });
+            const url = `https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/${branch}/${path}`;
+            core.setOutput('gif_url', url);
+            core.info(`published ${url}`);
+      - name: Warm replay GIF (raw.githubusercontent propagation)
+        # Advisory only — the Publish step already confirmed the upload, so the comment uses
+        # the URL regardless; this just pre-fetches so the image is warm in camo when viewed.
+        # Never blocks/fails (raw can lag a few seconds after the Contents API write).
+        if: steps.gate.outputs.skip == 'false' && steps.media.outputs.gif_url != ''
+        continue-on-error: true
+        shell: bash
+        run: |
+          url="${{ steps.media.outputs.gif_url }}"
+          for i in $(seq 1 10); do
+            code="$(curl -sSL -o /dev/null -w '%{http_code}' "$url" || echo 000)"
+            echo "warm attempt $i: $code"
+            [ "$code" = "200" ] && break
+            sleep 4
+          done
+          exit 0
+      - name: Render comment body
+        if: steps.gate.outputs.skip == 'false' && always()
+        shell: bash
+        run: |
+          url="${{ steps.media.outputs.gif_url }}"
+          if [ -f artifacts/behavior-ci-hosted/comment.md ]; then
+            if [ -n "$url" ]; then
+              cybernetics behavior-ci render-comment --artifact-dir artifacts/behavior-ci-hosted --replay-gif-url "$url" > body.md
+            else
+              cybernetics behavior-ci render-comment --artifact-dir artifacts/behavior-ci-hosted > body.md
+            fi
+          else
+            printf '### Behavior CI — commit `%s` ❌ ERROR\n\n_The hosted Isaac run produced no bundle (session/GPU error). See the run logs._\n' "${GITHUB_SHA:0:7}" > body.md
+          fi
+      - name: Post per-commit comment
         if: steps.gate.outputs.skip == 'false' && always() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const path = 'artifacts/behavior-ci/comment.md';
-            if (!fs.existsSync(path)) { core.warning('no comment.md produced'); return; }
-            const marker = '<!-- cybernetic-behavior-ci -->';
+            const sha = context.payload.pull_request.head.sha;
+            const short = sha.slice(0, 7);
+            const marker = `<!-- behavior-ci-commit:${sha} -->`;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const body = fs.readFileSync(path, 'utf8') + `\n\nArtifacts: [behavior-ci-artifacts](${runUrl})`;
+            const verdict = '${{ steps.run.outputs.exit_code }}' === '0' ? '✅ PASS'
+              : ('${{ steps.run.outputs.exit_code }}' === '1' ? '❌ FAIL' : '❌ ERROR');
+            let inner = fs.existsSync('body.md') ? fs.readFileSync('body.md', 'utf8') : '_No comment body produced._';
+            const body = `${marker}\n### Behavior CI — commit \`${short}\` ${verdict}\n\n${inner}\n\n[Run logs](${runUrl})`;
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, per_page: 100,
             });
@@ -146,18 +246,42 @@ jobs:
             } else {
               await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: context.issue.number, body });
             }
-
       - name: Finalize result
+        if: always()
         shell: bash
         run: |
-          set -euo pipefail
-          if [ "${{ steps.gate.outputs.skip }}" = "true" ]; then
-            echo "Hosted Isaac validation skipped (no credentials); not a behavior pass."
-            exit 0
-          fi
+          if [ "${{ steps.gate.outputs.skip }}" = "true" ]; then echo "skipped (no GPU credentials)"; exit 0; fi
           code="${{ steps.run.outputs.exit_code }}"
           case "$code" in
             0) echo "G1 behavior passed" ;;
             1) echo "::error::Unitree G1 behavior regression"; exit 1 ;;
+            "") echo "::error::hosted run recorded no exit code"; exit 1 ;;
             *) echo "::error::hosted behavior CI failed (exit $code)"; exit "$code" ;;
           esac
+
+  cleanup-media:
+    name: Clean up replay media on PR close
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Prune behavior-ci/pr-<n>/ from ci-media
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request.number;
+            const branch = 'ci-media';
+            const prefix = `behavior-ci/pr-${pr}/`;
+            const ref = await github.rest.git.getRef({ owner: context.repo.owner, repo: context.repo.repo, ref: `heads/${branch}` });
+            const base = ref.data.object.sha;
+            const tree = await github.rest.git.getTree({ owner: context.repo.owner, repo: context.repo.repo, tree_sha: base, recursive: 'true' });
+            const blobs = tree.data.tree.filter(t => t.type === 'blob');
+            const keep = blobs.filter(t => !t.path.startsWith(prefix)).map(t => ({ path: t.path, mode: t.mode, type: 'blob', sha: t.sha }));
+            if (keep.length === blobs.length) { core.info('no media to prune'); return; }
+            const treeArg = keep.length ? keep : [{ path: '.keep', mode: '100644', type: 'blob', content: '' }];
+            const newTree = await github.rest.git.createTree({ owner: context.repo.owner, repo: context.repo.repo, tree: treeArg });
+            const commit = await github.rest.git.createCommit({ owner: context.repo.owner, repo: context.repo.repo, message: `behavior-ci: prune pr-${pr} replay media`, tree: newTree.data.sha, parents: [base] });
+            await github.rest.git.updateRef({ owner: context.repo.owner, repo: context.repo.repo, ref: `heads/${branch}`, sha: commit.data.sha });
+            core.info(`pruned ${blobs.length - keep.length} media file(s) for pr-${pr}`);

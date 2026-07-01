@@ -1,16 +1,12 @@
 {
-  "schema_version": "behavior-ci-policy/v1",
+  "schema_version": "behavior-ci-policy/v2",
   "policy_id": "g1_weld_approach_v18",
   "display_filename": "g1_weld_approach_v18.pt",
   "behavior": "g1_weld_approach",
   "robot": "Unitree G1-compatible humanoid proxy",
   "backend": "scripted-vla-shim",
-  "controller": {
-    "type": "scripted_trajectory",
-    "clearance_margin_cm": 6.0,
-    "replan_enabled": false,
-    "approach_speed_mps": 0.6
-  },
+  "task": "g1_weld_approach",
+  "checkpoint": {"detour_mode":"relative","detour_gain":0.85,"clearance_margin_cm":6.5,"top_halfwidth_cm":30.0,"approach_speed_mps":0.075},
   "expected_demo_result": "failed",
-  "notes": "Regressed weld-approach: the clearance margin is too small for the shifted-obstacle distribution and there is no online replan, so the torch path enters the restricted zone / collides / times out on the harder trials."
+  "notes": "Regressed: under-sized detour + slow approach. The emitted trajectory clips the shifted obstacle / restricted zone on the hard scenarios and blows the time budget on the far seam. The environment measures this independently; there is no clearance number it trusts."
 }

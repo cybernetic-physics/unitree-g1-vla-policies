@@ -1,0 +1,18 @@
+{
+  "schema_version": "behavior-ci-policy/v2",
+  "policy_id": "g1_weld_approach_v21",
+  "display_filename": "g1_weld_approach_v21.pt",
+  "behavior": "g1_weld_approach",
+  "robot": "Unitree G1-compatible humanoid proxy",
+  "backend": "scripted-vla-shim",
+  "task": "g1_weld_approach",
+  "checkpoint": {
+    "detour_mode": "relative",
+    "detour_gain": 1.0,
+    "clearance_margin_cm": 12.0,
+    "top_halfwidth_cm": 30.0,
+    "approach_speed_mps": 0.12
+  },
+  "expected_demo_result": "passed",
+  "notes": "Honest obstacle-relative weld-approach (crank reverted). Solves every visible + held-out scenario; the hosted G1 run captures a clean weld and the per-commit comment shows a GREEN verdict + passing replay GIF."
+}

@@ -1,41 +1,23 @@
+# Hosted Isaac config (the real-robot gate). Same v2 pinned-task contract as the fixture
+# config; the saved-scene env_id, grader and eval come from the installed SDK task pack, so
+# this config no longer carries env_id or a module_path the candidate could repoint.
 schema_version: cybernetic-behavior-ci-config/v1
 project: unitree-g1-vla-policies
 robot: Unitree G1-compatible humanoid proxy
-
 artifacts:
   out: artifacts/behavior-ci
-  # Hosted runs produce genuine Isaac session replay video.
   require_replay_provenance: isaac-sim-session-video
-
 simulator:
-  # Real backend: boots a hosted Cybernetic Physics Isaac session from the saved
-  # `cicd` environment (the G1 + welding scene authored on the Cybernetic Physics
-  # site by user G-structure), then runs the weld-approach trials on the real
-  # robot in that loaded scene. The eval does NOT rebuild the scene — it loads the
-  # pre-saved env and measures behavior in it. base/MCP URLs default to hosted
-  # production in the SDK; only CYBERNETICS_API_KEY is required in the environment.
   adapter: isaac-session
   session:
     scene_env: behavior-ci-tabletop-welding
     camera: /World/Cameras/BehaviorCI_PassFailCamera
-    # Load G-structure's saved "cicd" environment (default version
-    # ver_d7c4c00c9ab54869, root stage scene.usd). The G1, weld seam, obstacle,
-    # restricted zone, and pass/fail camera all come from this saved scene — so we
-    # do NOT spawn a robot or run setup_scene (which would rebuild and re-save it).
-    env_id: env_7d904291a384a1ae
     gpu_spec: rtx4090
-    # Upload the trial entrypoint only; the scene already exists in the saved env,
-    # so there is no spawn_robot / setup_entrypoint (no author-at-runtime).
-    module_path: isaac/behavior_ci_env.py
     idle_timeout_minutes: 30
-    # Cold warm-node launches (Vast provision + Isaac boot) can exceed 15 min, so
-    # give the queue-then-boot path generous headroom.
     ready_timeout_seconds: 1800
-
 policy_backends:
   scripted-vla-shim:
     type: scripted
-
-evals:
-  obstacle_shift:
-    path: evals/g1_weld_obstacle_shift.yaml
+task_source:
+  kind: repo
+  dir: tasks
