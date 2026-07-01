@@ -1,2 +1,5 @@
 artifacts/*
 !artifacts/.gitkeep
+
+__pycache__/
+*.pyc

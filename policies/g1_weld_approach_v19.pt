@@ -1,16 +1,12 @@
 {
-  "schema_version": "behavior-ci-policy/v1",
+  "schema_version": "behavior-ci-policy/v2",
   "policy_id": "g1_weld_approach_v19",
   "display_filename": "g1_weld_approach_v19.pt",
   "behavior": "g1_weld_approach",
   "robot": "Unitree G1-compatible humanoid proxy",
   "backend": "scripted-vla-shim",
-  "controller": {
-    "type": "scripted_trajectory",
-    "clearance_margin_cm": 14.0,
-    "replan_enabled": true,
-    "approach_speed_mps": 0.9
-  },
+  "task": "g1_weld_approach",
+  "checkpoint": {"detour_mode":"relative","detour_gain":1.0,"clearance_margin_cm":12.0,"top_halfwidth_cm":30.0,"approach_speed_mps":0.12},
   "expected_demo_result": "passed",
-  "notes": "Fixed weld-approach: obstacle-shift augmentation widened the clearance margin and enabled online replan, so every trial in the obstacle-shift suite clears the obstacle and the restricted zone."
+  "notes": "Obstacle-relative detour sized from the observed obstacle; clears every visible and held-out scenario."
 }
