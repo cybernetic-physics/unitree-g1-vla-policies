@@ -8,11 +8,11 @@
   "task": "g1_weld_approach",
   "checkpoint": {
     "detour_mode": "relative",
-    "detour_gain": 0.85,
-    "clearance_margin_cm": 6.5,
+    "detour_gain": 1.0,
+    "clearance_margin_cm": 12.0,
     "top_halfwidth_cm": 30.0,
-    "approach_speed_mps": 0.075
+    "approach_speed_mps": 0.12
   },
-  "expected_demo_result": "failed",
-  "notes": "First finetune pass for the shifted-obstacle task: the detour under-shoots the observed obstacle (gain 0.85) with a slow approach. Clears the easy scenarios but clips the obstacle / restricted zone on the hard shifts and times out on the far seam."
+  "expected_demo_result": "passed",
+  "notes": "Corrected finetune: size the detour to the observed obstacle (gain 1.0 + 12cm margin) and restore the approach speed. Clears the obstacle and the restricted zone and reaches the seam in budget on all 8 visible scenarios AND the held-out perturbations."
 }
