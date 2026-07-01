@@ -1,0 +1,18 @@
+{
+  "schema_version": "behavior-ci-policy/v2",
+  "policy_id": "g1_weld_approach_v22",
+  "display_filename": "g1_weld_approach_v22.pt",
+  "behavior": "g1_weld_approach",
+  "robot": "Unitree G1-compatible humanoid proxy",
+  "backend": "scripted-vla-shim",
+  "task": "g1_weld_approach",
+  "checkpoint": {
+    "detour_mode": "relative",
+    "detour_gain": 0.85,
+    "clearance_margin_cm": 6.5,
+    "top_halfwidth_cm": 30.0,
+    "approach_speed_mps": 0.075
+  },
+  "expected_demo_result": "failed",
+  "notes": "First finetune pass for the shifted-obstacle task: the detour under-shoots the observed obstacle (gain 0.85) and the approach is slow, so the torch clips the obstacle / restricted zone on the hard shifts and blows the time budget on the far seam. Behavior CI should flag this."
+}
