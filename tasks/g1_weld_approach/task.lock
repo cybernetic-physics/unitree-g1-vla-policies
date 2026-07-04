@@ -4,8 +4,8 @@
   "task_version": "1",
   "grader_entrypoint": "behavior_ci_run_trial",
   "digests": {
-    "grader_isaac.py": "e0a0dc93332e46d35d2c08b083c3cef927b3f110fb2ab545cca6a3ff4488b914",
-    "task.py": "78045639ac5a567d716434d441bc01a7c12d237929e0a3d185d218d8218a577f",
+    "grader_isaac.py": "16815614ab24c2e7f95396502e10de2561a8ad4495397aa5bd2a83e5af58f009",
+    "task.py": "42749950101ab960dfd2f60d52ed454f861e195df3a91fa034a21f82d7ee0bb1",
     "task.toml": "9e480569c563549c9c21cfb8600af953e58e7511d7fdfd10d7b42eac7f1b6534"
   }
 }

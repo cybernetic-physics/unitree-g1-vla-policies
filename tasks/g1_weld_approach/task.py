@@ -308,10 +308,14 @@ def measure(trajectory: dict, observation: dict) -> dict:
 class WeldApproach(Task):
     behavior = "g1_weld_approach"
     robot = "Unitree G1-compatible humanoid proxy"
-    world = "tabletop_welding_obstacle_shift_v1"
-    scene_env = "behavior-ci-tabletop-welding"
+    world = "pipe_yard_welding_obstacle_shift_v2"
+    scene_env = "behavior-ci-pipe-yard-welding"
     camera = "/World/Cameras/BehaviorCI_PassFailCamera"
-    env_id = "env_7d904291a384a1ae"
+    # cicd_ship_yard: outdoor pipe-yard welding scene (realism pass, Jul 2026).
+    # The pipe seam ring, obstacle clamp, restricted zone and pass/fail camera were
+    # placed from the CALIBRATED G1 reach in-session and verified there (see
+    # isaac/scene_realism.py); the publish sets this env's default version.
+    env_id = "env_f4b83937bc980161"
 
     def scenarios(self):
         return list(VISIBLE), list(HELD_OUT)
