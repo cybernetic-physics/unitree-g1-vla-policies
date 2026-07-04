@@ -73,6 +73,26 @@ can see the gate work without a hosted session.
 > platform infrastructure** (a server-side run the candidate can't forge), required by branch
 > protection. See the PR's post-merge steps.
 
+## The hosted scene: `cicd_ship_yard`
+
+The pinned saved environment (`env_f4b83937bc980161`, name `cicd_ship_yard`) is an outdoor
+pipe-yard welding cell: the real Unitree G1, braced at a carbon-steel pipe elevated on jack
+stands at its measured working height, with the weld-seam ring, obstacle clamp, translucent
+restricted zone and the fixed pass/fail camera all placed from the **calibrated reach of the
+robot itself** — nothing scene-metric is hardcoded.
+
+| Before | After |
+|---|---|
+| ![before](assets/scene-previews/before-realism-pass.jpg) | ![after](assets/scene-previews/after-realism-pass.jpg) |
+
+The scene was converged with a capture → critique → refine loop over a live hosted session
+(7 iterations: robot finish, pipe/ground materials, layout, stance, calibrated CI prims,
+camera framing) and verified in-session before publishing: the v18 controller collides with
+the clamp and intrudes the zone; v19 lands 0.11 cm from the seam with 16 cm clearance.
+`isaac/scene_realism.py` re-authors the same result on a fresh session — recalibrate,
+re-place, re-verify — so the dressing survives robot/asset updates. (Lesson learned there:
+any posture change shifts the settled reach by centimeters; always recalibrate after one.)
+
 ## Honesty
 
 The `.pt` files are JSON manifests resolved by a `scripted-vla-shim` planner — **not** a

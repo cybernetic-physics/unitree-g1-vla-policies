@@ -10,7 +10,7 @@ artifacts:
 simulator:
   adapter: isaac-session
   session:
-    scene_env: behavior-ci-tabletop-welding
+    scene_env: behavior-ci-pipe-yard-welding
     camera: /World/Cameras/BehaviorCI_PassFailCamera
     gpu_spec: rtx4090
     idle_timeout_minutes: 30
