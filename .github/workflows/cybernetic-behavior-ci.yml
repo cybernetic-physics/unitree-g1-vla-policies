@@ -40,6 +40,10 @@ permissions:
 
 env:
   # Pinned by commit SHA on the cybernetic SDK (PR cybernetic-physics/cybernetic#10).
+  # TODO-ON-MERGE: bump this pin to the merged SHA of the learned-mlp SDK PR
+  # (branch codex/learned-mlp-backend). Until then, CI on this PR runs the OLD SDK,
+  # which does not know the learned-mlp backend — that is expected; the pin moves
+  # only after the SDK PR merges.
   CYBERNETICS_SDK_SPEC: "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@656b9085c53cd14e0ea43c7868fa0f71a5a7c119"
 
 jobs:
@@ -65,7 +69,9 @@ jobs:
           set -euo pipefail
           ref=""
           if [ -n "${BASE_REF:-}" ]; then
-            git fetch --no-tags --depth=1 origin "$BASE_REF" || true
+            # Full fetch: a shallow (--depth=1) base can make `git diff base...HEAD`
+            # miss the true merge-base and resolve the wrong changed policy.
+            git fetch --no-tags origin "$BASE_REF" || true
             ref="$(git diff --name-only "origin/$BASE_REF...HEAD" -- 'policies/*.pt' | sort | tail -n 1 || true)"
           fi
           [ -n "$ref" ] || ref="policies/g1_weld_approach_v21.pt"
@@ -87,6 +93,7 @@ jobs:
             --config cybernetic-behavior-ci.yaml \
             --policy-ref "${{ steps.policy.outputs.ref }}" \
             --eval obstacle_shift \
+            --commit "${{ github.event.pull_request.head.sha || github.sha }}" \
             --out artifacts/behavior-ci
       - name: Upload artifact bundle
         if: always()
@@ -140,7 +147,8 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: |
           set -euo pipefail
-          git fetch --no-tags --depth=1 origin "$BASE_REF" || true
+          # Full fetch (see contract job): shallow base breaks merge-base resolution.
+          git fetch --no-tags origin "$BASE_REF" || true
           ref="$(git diff --name-only "origin/$BASE_REF...HEAD" -- 'policies/*.pt' | sort | tail -n 1 || true)"
           [ -n "$ref" ] || ref="policies/g1_weld_approach_v21.pt"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
@@ -154,6 +162,7 @@ jobs:
             --config cybernetic-behavior-ci.hosted.yaml \
             --policy-ref "${{ steps.policy.outputs.ref }}" \
             --eval obstacle_shift \
+            --commit "${{ github.event.pull_request.head.sha || github.sha }}" \
             --out artifacts/behavior-ci-hosted
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
       - name: Upload artifact bundle

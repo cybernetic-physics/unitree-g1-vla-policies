@@ -73,13 +73,59 @@ can see the gate work without a hosted session.
 > platform infrastructure** (a server-side run the candidate can't forge), required by branch
 > protection. See the PR's post-merge steps.
 
+## Use a real learned policy (`learned-mlp`, v24+)
+
+Starting with `policies/g1_weld_approach_v24.pt`, the repo also carries a **real learned
+policy**: the checkpoint holds base64-encoded float32 weights for a `[2, 8, 3]` tanh MLP
+with a linear skip connection. The SDK's `learned-mlp` backend *decodes* the weights (closed
+checkpoint schema: `format`, `arch`, `weights_b64`, `feature_spec`, `output_spec` — nothing
+else); the task planner runs the forward pass in pure Python:
+
+```
+f   = [obstacle_top_y / 100, seam_x / 300]        # feature_spec weld-geometry/v1
+h   = tanh(W1ᵀ f + b1)
+out = W2ᵀ h + b2 + Wskipᵀ f + bskip               # output_spec trapezoid/v1
+    = [apex_cm, top_halfwidth_cm, speed_mps]
+```
+
+The environment still measures the emitted trajectory independently — trained weights get
+no more trust than the scripted shim did.
+
+How v24 was made: `scripts/train_weld_mlp.py` (pure numpy, deterministic seed) distills the
+obstacle-relative controller (`apex = obstacle_top_y + 12`, halfwidth 30, speed 0.12) into
+the net with plain gradient descent over sampled task geometry (offsets 6–70 cm, both +y-face
+variants, both seam distances), to near-zero loss. The linear skip keeps extrapolation to
+large obstacles linear instead of tanh-saturated — that is what lets it clear the held-out
+50/58 cm offsets. `g1_weld_approach_v24_undertrained.pt` is the same architecture stopped
+after 5 gradient steps: it fails the gate geometrically, which is the point.
+
+This is a genuinely learned policy but **not** a VLA: provenance reads
+`policy backend: learned-mlp (real VLA: false)`. Only a future `real-vla` backend may claim
+otherwise.
+
 ## Honesty
 
-The `.pt` files are JSON manifests resolved by a `scripted-vla-shim` planner — **not** a
-learned VLA, and the fixture is a kinematic model, not process-accurate welding. Provenance is
-always explicit in `result.json` (`policy_backend_real_vla: false`, `pins_verified`, the task
-digest, `simulator_adapter`, `replay_source`). Wiring a real VLA/GR00T checkpoint is a
-documented next step: the `act(observation) -> trajectory` + `measure` contract stays the same.
+The v18–v22 `.pt` files are JSON manifests resolved by a `scripted-vla-shim` planner — **not**
+learned policies; they remain checked in as the original red/green demo history. From v24 the
+manifests carry **real trained MLP weights** (see above) — learned, but still not a VLA, and
+the fixture is a kinematic model, not process-accurate welding. Provenance is always explicit
+in `result.json` (`policy_backend_real_vla: false`, `pins_verified`, the task digest,
+`simulator_adapter`, `replay_source`). Wiring a real VLA/GR00T checkpoint is a documented
+next step: the `act(observation) -> trajectory` + `measure` contract stays the same.
+
+## Prerequisites
+
+- Python **>= 3.11** (the SDK and this repo's task pack use 3.11+ features)
+- [`uv`](https://docs.astral.sh/uv/) recommended for env + installs (plain `pip` works too)
+
+```bash
+uv venv --python 3.11 .venv
+uv pip install --python .venv/bin/python \
+  "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@<pinned-sha>"
+```
+
+(`scripts/train_weld_mlp.py` additionally needs `numpy`; the judged task pack itself is
+dependency-free on purpose.)
 
 ## Run it
 
@@ -89,6 +135,10 @@ pip install "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic
 # honest policy -> exit 0
 cybernetics behavior-ci run --config cybernetic-behavior-ci.yaml \
   --policy-ref policies/g1_weld_approach_v21.pt --eval obstacle_shift --out artifacts/behavior-ci
+
+# the real learned MLP policy -> exit 0 (16/16 incl. held-out)
+cybernetics behavior-ci run --config cybernetic-behavior-ci.yaml \
+  --policy-ref policies/g1_weld_approach_v24.pt --eval obstacle_shift --out artifacts/behavior-ci
 
 # integrity gate (closed schema + pinned eval/grader)
 cybernetics behavior-ci verify-task --config cybernetic-behavior-ci.yaml \
