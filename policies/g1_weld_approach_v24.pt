@@ -18,5 +18,10 @@
     "output_spec": "trapezoid/v1"
   },
   "expected_demo_result": "passed",
-  "notes": "Real learned MLP ([2,8,3] tanh + linear skip, 60 float32 weights) distilled from the obstacle-relative v21 controller by scripts/train_weld_mlp.py (plain gradient descent, deterministic seed, final normalized loss ~7e-06). The net maps [obstacle_top_y/100, seam_x/300] to [apex_cm, top_halfwidth_cm, speed_mps]; the planner builds the same trapezoid and the environment measures the trajectory. This is a genuinely learned policy but NOT a VLA -- provenance stays real_vla=false. Promoted after the undertrained twin failed the same gate on this PR (red -> green on real weights)."
+  "notes": "Real learned MLP ([2,8,3] tanh + linear skip, 60 float32 weights) distilled from the obstacle-relative v21 controller by scripts/train_weld_mlp.py (plain gradient descent, deterministic seed, final normalized loss ~7e-06). The net maps [obstacle_top_y/100, seam_x/300] to [apex_cm, top_halfwidth_cm, speed_mps]; the planner builds the same trapezoid and the environment measures the trajectory. This is a genuinely learned policy but NOT a VLA -- provenance stays real_vla=false. Promoted after the undertrained twin failed the same gate on this PR (red -> green on real weights).",
+  "provenance": {
+    "trained_by": "scripts/train_weld_mlp.py",
+    "distilled_from": "g1_weld_approach_v21",
+    "note": "graded on the hosted G1 after the undertrained twin failed the same gate"
+  }
 }
