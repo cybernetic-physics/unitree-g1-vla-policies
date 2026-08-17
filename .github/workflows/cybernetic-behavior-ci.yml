@@ -65,6 +65,7 @@ jobs:
         shell: bash
         env:
           BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           ref=""
@@ -72,7 +73,13 @@ jobs:
             # Full fetch: a shallow (--depth=1) base can make `git diff base...HEAD`
             # miss the true merge-base and resolve the wrong changed policy.
             git fetch --no-tags origin "$BASE_REF" || true
-            ref="$(git diff --name-only "origin/$BASE_REF...HEAD" -- 'policies/*.pt' | sort | tail -n 1 || true)"
+            # Grade what THIS push changed. Falling straight back to the whole-PR diff picks
+            # the lexically-last policy in the PR, which silently ignores the commit the
+            # developer just pushed when a PR touches more than one policy.
+            if [ -n "${HEAD_SHA:-}" ] && git cat-file -e "${HEAD_SHA}^1" 2>/dev/null; then
+              ref="$(git diff --name-only "${HEAD_SHA}^1" "$HEAD_SHA" -- 'policies/*.pt' | sort | tail -n 1 || true)"
+            fi
+            [ -n "${ref:-}" ] || ref="$(git diff --name-only "origin/$BASE_REF...HEAD" -- 'policies/*.pt' | sort | tail -n 1 || true)"
           fi
           [ -n "$ref" ] || ref="policies/g1_weld_approach_v21.pt"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
@@ -145,11 +152,18 @@ jobs:
         shell: bash
         env:
           BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           # Full fetch (see contract job): shallow base breaks merge-base resolution.
           git fetch --no-tags origin "$BASE_REF" || true
-          ref="$(git diff --name-only "origin/$BASE_REF...HEAD" -- 'policies/*.pt' | sort | tail -n 1 || true)"
+          # Grade what THIS push changed. Falling straight back to the whole-PR diff picks
+          # the lexically-last policy in the PR, which silently ignores the commit the
+          # developer just pushed when a PR touches more than one policy.
+          if [ -n "${HEAD_SHA:-}" ] && git cat-file -e "${HEAD_SHA}^1" 2>/dev/null; then
+            ref="$(git diff --name-only "${HEAD_SHA}^1" "$HEAD_SHA" -- 'policies/*.pt' | sort | tail -n 1 || true)"
+          fi
+          [ -n "${ref:-}" ] || ref="$(git diff --name-only "origin/$BASE_REF...HEAD" -- 'policies/*.pt' | sort | tail -n 1 || true)"
           [ -n "$ref" ] || ref="policies/g1_weld_approach_v21.pt"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
       - name: Run Behavior CI on the real G1

@@ -22,6 +22,7 @@
   "provenance": {
     "trained_by": "scripts/train_weld_mlp.py",
     "distilled_from": "g1_weld_approach_v21",
-    "note": "graded on the hosted G1 after the undertrained twin failed the same gate"
+    "note": "graded on the hosted G1 after the undertrained twin failed the same gate",
+    "graded": "hosted Isaac G1, PR #15"
   }
 }
