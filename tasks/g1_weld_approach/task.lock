@@ -5,7 +5,7 @@
   "grader_entrypoint": "behavior_ci_run_trial",
   "digests": {
     "grader_isaac.py": "e0a0dc93332e46d35d2c08b083c3cef927b3f110fb2ab545cca6a3ff4488b914",
-    "task.py": "78045639ac5a567d716434d441bc01a7c12d237929e0a3d185d218d8218a577f",
+    "task.py": "9551a0e9ab7e680a440bdf72c53bdb7167d6207d885ac68ecd93812d739c34fb",
     "task.toml": "9e480569c563549c9c21cfb8600af953e58e7511d7fdfd10d7b42eac7f1b6534"
   }
 }

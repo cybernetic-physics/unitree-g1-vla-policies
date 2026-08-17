@@ -34,7 +34,10 @@ permissions:
 
 env:
   # Pinned by commit SHA on the cybernetic SDK; read from BASE (a PR cannot change it here).
-  CYBERNETICS_SDK_SPEC: "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@656b9085c53cd14e0ea43c7868fa0f71a5a7c119"
+  # TODO-ON-MERGE: bump this pin to the merged SHA of the learned-mlp SDK PR
+  # (branch codex/learned-mlp-backend). Until then this job runs the OLD SDK and cannot
+  # grade learned-mlp policies — expected during the transition.
+  CYBERNETICS_SDK_SPEC: "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@96275f8d3e861ac7c4b22da2db359ad74f2a79fb"
 
 jobs:
   authoritative:
