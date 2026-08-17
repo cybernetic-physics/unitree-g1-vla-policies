@@ -18,6 +18,8 @@ simulator:
 policy_backends:
   scripted-vla-shim:
     type: scripted
+  learned-mlp:
+    type: learned
 task_source:
   kind: repo
   dir: tasks

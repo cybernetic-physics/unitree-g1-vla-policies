@@ -15,6 +15,8 @@ simulator:
 policy_backends:
   scripted-vla-shim:
     type: scripted
+  learned-mlp:
+    type: learned
 # (sha256 in the SDK task lock); editing it is rejected by `verify-task` (exit 4) and ignored
 # for grading. Kept here only for readability.
 task_source:

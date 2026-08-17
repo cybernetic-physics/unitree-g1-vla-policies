@@ -112,6 +112,40 @@ def build_observation(scenario: dict) -> dict:
 MAX_SPEED_MPS = 2.0
 
 
+def _trapezoid(start: list, seam: list, apex: float, thw: float, speed: float) -> dict:
+    """Shared trapezoid construction: start -> P1 -> P2 -> seam with shelf height ``apex``."""
+    speed = max(0.0, min(speed, MAX_SPEED_MPS))
+
+    mx = 0.5 * (start[0] + seam[0])
+    z = start[2]
+
+    p1 = [mx - thw, apex, z]
+    p2 = [mx + thw, apex, z]
+
+    waypoints = [list(start), p1, p2, list(seam)]
+    return {"waypoints": waypoints, "speed_mps": speed}
+
+
+def _mlp_forward(mlp: dict, features: list) -> list:
+    """Pure-python forward pass: h = tanh(W1ᵀf + b1); out = W2ᵀh + b2 + Wskipᵀf + bskip."""
+    w1, b1 = mlp["w1"], mlp["b1"]
+    w2, b2 = mlp["w2"], mlp["b2"]
+    wskip, bskip = mlp["wskip"], mlp["bskip"]
+    n_in, hidden = len(w1), len(b1)
+    n_out = len(b2)
+    h = [
+        math.tanh(sum(features[i] * w1[i][j] for i in range(n_in)) + b1[j])
+        for j in range(hidden)
+    ]
+    return [
+        sum(h[j] * w2[j][k] for j in range(hidden))
+        + b2[k]
+        + sum(features[i] * wskip[i][k] for i in range(n_in))
+        + bskip[k]
+        for k in range(n_out)
+    ]
+
+
 def plan(checkpoint: dict, observation: dict) -> dict:
     start = list(observation["start_pose"])
     seam = list(observation["seam_pose"])
@@ -121,6 +155,18 @@ def plan(checkpoint: dict, observation: dict) -> dict:
 
     # Far (+y) face of the obstacle as seen in the observation geometry.
     obstacle_top_y = oc[1] + oh[1]
+
+    mlp = checkpoint.get("mlp")
+    if mlp is not None:
+        # Learned path (decoded by the SDK's learned-mlp backend): the net maps the
+        # observed geometry to the trapezoid parameters. feature_spec weld-geometry/v1,
+        # output_spec trapezoid/v1 = [apex_cm, top_halfwidth_cm, speed_mps].
+        features = [obstacle_top_y / 100.0, seam[0] / 300.0]
+        out = _mlp_forward(mlp, features)
+        apex = out[0]  # used raw: the environment measures the resulting trajectory
+        thw = max(15.0, min(out[1], 45.0))
+        speed = max(0.05, min(out[2], 2.0))
+        return _trapezoid(start, seam, apex, thw, speed)
 
     mode = checkpoint.get("detour_mode", "relative")
     if mode == "absolute":
@@ -133,16 +179,7 @@ def plan(checkpoint: dict, observation: dict) -> dict:
 
     thw = float(checkpoint.get("top_halfwidth_cm", 30.0))
     speed = float(checkpoint.get("approach_speed_mps", 0.1))
-    speed = max(0.0, min(speed, MAX_SPEED_MPS))
-
-    mx = 0.5 * (start[0] + seam[0])
-    z = start[2]
-
-    p1 = [mx - thw, apex, z]
-    p2 = [mx + thw, apex, z]
-
-    waypoints = [list(start), p1, p2, list(seam)]
-    return {"waypoints": waypoints, "speed_mps": speed}
+    return _trapezoid(start, seam, apex, thw, speed)
 
 
 # ----------------------------------------------------------------------------------------

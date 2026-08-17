@@ -1,0 +1,22 @@
+{
+  "schema_version": "behavior-ci-policy/v2",
+  "policy_id": "g1_weld_approach_v24",
+  "display_filename": "g1_weld_approach_v24.pt",
+  "behavior": "g1_weld_approach",
+  "robot": "Unitree G1-compatible humanoid proxy",
+  "backend": "learned-mlp",
+  "task": "g1_weld_approach",
+  "checkpoint": {
+    "format": "mlp/f32-le/v1",
+    "arch": [
+      2,
+      8,
+      3
+    ],
+    "weights_b64": "O1baPjk5PL4HjhA/ZrEoP7bvDL8qdxw/HT1cvv2zxr4Fu02+Ao76vhWqFD6DR3G9ItoGPygzpT5nxAk+3KKQvrapg743fKW9dCr4vLySar6KWDq+/BGFvqzoA78hqfI++ZgEQpFE6MAg9xO9GsSVwXFBncCyhUA8AWOdwOxWLMDLsTE8oZrHQdPGyMAtH7Q9syoXwpz2TMAS1Q88N5nLQUnnvT/qnUC8pcpWwvJkgsEJ/FO7zOwGwkBjmEAlxiQ9/qHLQKFN/0BQJ2M9AqllQYm+iUC5eqG8qL0VQVlFaz+jbT48/qHLQKFN/0BQJ2M9",
+    "feature_spec": "weld-geometry/v1",
+    "output_spec": "trapezoid/v1"
+  },
+  "expected_demo_result": "passed",
+  "notes": "Real learned MLP ([2,8,3] tanh + linear skip, 60 float32 weights) distilled from the obstacle-relative v21 controller by scripts/train_weld_mlp.py (plain gradient descent, deterministic seed, final normalized loss ~7e-06). The net maps [obstacle_top_y/100, seam_x/300] to [apex_cm, top_halfwidth_cm, speed_mps]; the planner builds the same trapezoid and the environment measures the trajectory. This is a genuinely learned policy but NOT a VLA -- provenance stays real_vla=false."
+}

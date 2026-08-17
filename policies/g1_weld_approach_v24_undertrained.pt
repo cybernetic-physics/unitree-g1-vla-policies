@@ -1,0 +1,22 @@
+{
+  "schema_version": "behavior-ci-policy/v2",
+  "policy_id": "g1_weld_approach_v24_undertrained",
+  "display_filename": "g1_weld_approach_v24_undertrained.pt",
+  "behavior": "g1_weld_approach",
+  "robot": "Unitree G1-compatible humanoid proxy",
+  "backend": "learned-mlp",
+  "task": "g1_weld_approach",
+  "checkpoint": {
+    "format": "mlp/f32-le/v1",
+    "arch": [
+      2,
+      8,
+      3
+    ],
+    "weights_b64": "xO8tQHv4k8DMNMM/STrfPe1c9T9G9hk/h6cvQDHpEb5lVxS/9K1RP8u6JT/l5+a+vSKsvky3ij8Zhoc/aXJPv2ZA4z3J9xy9CFzBPY78ljxEoxW85MukPF5SNjxWQXu+0/GnwZw1G8KZ53k+Qza9wSq24UEhOo89i/IWQ+3VDkJM6zI9z6rcQnuIqsHGs0A+J1/SwipcFEEA1hw+2SinQQFD8MDVjPy9JA+hwW9jx0EbXwQ+hTuwwYTa4sHjxNA9NFGxQHFhpz+K7Yi7X63PwoehLMG4x+u9xK1pQjEZrkADMY49NFGxQHFhpz+K7Yi7",
+    "feature_spec": "weld-geometry/v1",
+    "output_spec": "trapezoid/v1"
+  },
+  "expected_demo_result": "failed",
+  "notes": "Deliberately UNDERTRAINED variant of v24: same [2,8,3]+skip architecture, same training script (scripts/train_weld_mlp.py), stopped after 5 gradient steps from a bad seed (final normalized loss ~1.3). Its apex/speed outputs are far off, so the emitted trajectory fails the geometric checks (collision/intrusion/timeout). Kept as the honest red half of the red/green history for the learned backend."
+}
