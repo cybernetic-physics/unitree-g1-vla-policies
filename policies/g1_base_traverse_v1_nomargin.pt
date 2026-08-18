@@ -1,0 +1,18 @@
+{
+  "schema_version": "behavior-ci-policy/v2",
+  "policy_id": "g1_base_traverse_v1_nomargin",
+  "display_filename": "g1_base_traverse_v1_nomargin.pt",
+  "behavior": "g1_base_traverse",
+  "robot": "Unitree G1-compatible humanoid proxy",
+  "backend": "scripted-vla-shim",
+  "task": "g1_base_traverse",
+  "checkpoint": {
+    "offset_mode": "relative",
+    "offset_gain": 1.0,
+    "clearance_margin_cm": 53.0,
+    "detour_half_span_cm": 200.0,
+    "walk_speed_mps": 1.2
+  },
+  "expected_demo_result": "failed",
+  "notes": "Deliberately ZERO-MARGIN twin of v1: identical planner, margin cut from 65 cm to 53 cm -- the exact minimum that still clears the geometry with nothing to spare. It is GREEN on all 16 scenarios at the 'nominal' domain and GREEN under 'actuation_degraded', then goes RED under 'obs_noise' on both keep_out rows (visible 3 and held-out 1): the perception error contributes -2.94 cm to the planned offset and the admissible margin floor rises from 53 to 56 cm, so the base clips the inflated restricted band and zone_clear fails (measured min_clearance_to_obstacle_cm 25.07 where v1 measures 37.07). That is the honest point of the domain sweep -- a policy that only just clears the geometry has no business shipping, and this file is the proof that the sweep can tell the difference."
+}
