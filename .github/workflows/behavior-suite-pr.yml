@@ -1,0 +1,175 @@
+name: Behavior Suite — pull request
+
+# The "every commit" half. Two lanes, deliberately split by what they cost:
+#
+#   suite-contract  cheap, no secrets, runs on every PR including forks, and fans out one job
+#                   per subsystem so a manipulation change does not wait behind locomotion.
+#                   This is the lane that answers "did anyone break the contract".
+#
+#   suite-hosted    expensive, needs the platform key, and only grades the behaviors whose
+#                   policy files this PR actually touched. Grading all of them on every commit
+#                   would burn GPU minutes to re-confirm results the nightly already covers.
+#
+# The customer's framing: "you have that kind of GPU farm ... when you're running your
+# behavior jobs that require the GPU versus just unit tests". These are the two tiers.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "policies/**"
+      - "tasks/**"
+      - "behavior-ci-suite.yaml"
+      - "cybernetic-behavior-ci*.yaml"
+      - "baselines/**"
+      - ".github/workflows/behavior-suite-pr.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: behavior-suite-pr-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # TODO-ON-MERGE: bump to the merge commit of cybernetic-physics/cybernetic#35.
+  CYBERNETICS_SDK_SPEC: "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@490dcb1d8e5b3e2479970a13cbee563561c22ebc"
+
+jobs:
+  suite-contract:
+    name: Contract suite (${{ matrix.subsystem }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        subsystem: [manipulation, locomotion, perception]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pinned Cybernetics SDK
+        run: pip install "${CYBERNETICS_SDK_SPEC}"
+
+      - name: Run the offline suite for this subsystem
+        run: |
+          cybernetics behavior-ci suite run \
+            --suite behavior-ci-suite.yaml \
+            --config cybernetic-behavior-ci.yaml \
+            --subsystem "${{ matrix.subsystem }}" \
+            --baseline baselines/main.json \
+            --commit "${{ github.event.pull_request.head.sha || github.sha }}" \
+            --out "artifacts/suite-${{ matrix.subsystem }}"
+
+      - name: Upload subsystem artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: behavior-suite-${{ matrix.subsystem }}
+          path: artifacts/suite-${{ matrix.subsystem }}
+          if-no-files-found: warn
+
+  suite-hosted:
+    name: Hosted grade for changed behaviors
+    runs-on: ubuntu-latest
+    environment: behavior-ci
+    timeout-minutes: 60
+    env:
+      CYBERNETICS_API_KEY: ${{ secrets.CYBERNETICS_API_KEY }}
+      CYBERNETICS_MCP_API_KEY: ${{ secrets.CYBERNETICS_MCP_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gate on platform credentials
+        id: gate
+        shell: bash
+        run: |
+          if [ -z "${CYBERNETICS_API_KEY:-}" ]; then
+            echo "::notice::Hosted grading skipped (fork PR or unset key). The contract suite is the gate."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.skip == 'false'
+        with:
+          python-version: "3.11"
+
+      - name: Install pinned Cybernetics SDK
+        if: steps.gate.outputs.skip == 'false'
+        run: pip install "${CYBERNETICS_SDK_SPEC}"
+
+      - name: Resolve the behaviors this PR touched
+        if: steps.gate.outputs.skip == 'false'
+        id: changed
+        shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$BASE_REF" || true
+          changed="$(git diff --name-only "origin/$BASE_REF...HEAD" -- 'policies/*.pt' || true)"
+          # Map each changed policy file to the suite behavior that pins it. A behavior whose
+          # policy is untouched is not re-graded here; the nightly covers the whole suite.
+          ids="$(printf '%s\n' "$changed" | python3 scripts/suite_changed_behaviors.py --suite behavior-ci-suite.yaml)"
+          echo "ids=$ids" >> "$GITHUB_OUTPUT"
+          if [ -z "$ids" ]; then
+            echo "::notice::No policy files changed; nothing to grade on the GPU."
+          else
+            echo "Grading: $ids"
+          fi
+
+      - name: Grade the changed behaviors on the real G1
+        id: run
+        if: steps.gate.outputs.skip == 'false' && steps.changed.outputs.ids != ''
+        shell: bash
+        run: |
+          set +e
+          args=""
+          IFS=',' read -ra ids <<< "${{ steps.changed.outputs.ids }}"
+          for id in "${ids[@]}"; do args="$args --behavior $id"; done
+          cybernetics behavior-ci suite run \
+            --suite behavior-ci-suite.yaml \
+            --config cybernetic-behavior-ci.hosted.yaml \
+            --baseline baselines/main.json \
+            --commit "${{ github.event.pull_request.head.sha }}" \
+            --out artifacts/suite-hosted $args
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Upload hosted artifacts
+        if: always() && steps.gate.outputs.skip == 'false' && steps.changed.outputs.ids != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: behavior-suite-hosted
+          path: artifacts/suite-hosted
+          if-no-files-found: warn
+
+      - name: Post the suite verdict on the pull request
+        if: always() && steps.gate.outputs.skip == 'false' && steps.changed.outputs.ids != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'artifacts/suite-hosted/suite-comment.md';
+            const sha = context.payload.pull_request.head.sha;
+            const body = fs.existsSync(path)
+              ? fs.readFileSync(path, 'utf8')
+              : `The hosted suite exited ${{ steps.run.outputs.exit_code }} before writing a report. See the run log.`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: `<!-- behavior-suite-commit:${sha} -->\n${body}`,
+            });
+
+      - name: Fail when a graded behavior failed
+        if: steps.gate.outputs.skip == 'false' && steps.changed.outputs.ids != '' && steps.run.outputs.exit_code != '0'
+        run: exit 1
