@@ -533,7 +533,9 @@ class SeamInspect(Task):
     robot = "Unitree G1-compatible humanoid proxy"
     world = "weld_cell_seam_inspection_v1"
     scene_env = "behavior-ci-weld-cell-inspection"
-    camera = "/World/Cameras/BehaviorCI_HeadCamera"
+    camera = "/World/Cameras/BehaviorCI_PassFailCamera"  # the shipyard scene ships one
+    # calibrated pass/fail camera; a per-behavior camera would have to be authored and
+    # verified in-session first, and an un-authored camera path fails the scene check.
     env_id = "env_7d904291a384a1ae"
     action_contract = "lookplan/v1"
 

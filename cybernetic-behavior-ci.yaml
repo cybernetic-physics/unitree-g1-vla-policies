@@ -10,7 +10,7 @@ artifacts:
 simulator:
   adapter: fixture
   session:
-    scene_env: behavior-ci-tabletop-welding
+    scene_env: behavior-ci-pipe-yard-welding
     camera: /World/Cameras/BehaviorCI_PassFailCamera
 policy_backends:
   scripted-vla-shim:
