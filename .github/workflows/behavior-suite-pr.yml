@@ -35,7 +35,7 @@ concurrency:
 
 env:
   # TODO-ON-MERGE: bump to the merge commit of cybernetic-physics/cybernetic#35.
-  CYBERNETICS_SDK_SPEC: "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@96275f8d3e861ac7c4b22da2db359ad74f2a79fb"
+  CYBERNETICS_SDK_SPEC: "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@490dcb1d8e5b3e2479970a13cbee563561c22ebc"
 
 jobs:
   suite-contract:
