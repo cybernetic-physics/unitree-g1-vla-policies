@@ -11,6 +11,7 @@ Exit codes: 0 pass, 1 behavior regression, 2 invalid/closed-schema input, 4 pin/
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -20,6 +21,15 @@ import pytest
 CLI = shutil.which("cybernetics")
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = "cybernetic-behavior-ci.yaml"
+
+# Locally, a missing SDK is a skip so the suite stays runnable on a bare checkout. In CI a
+# missing SDK is a FAILURE: a silent skip there reports green for a pipeline that never ran,
+# which is the one outcome a merge gate must never produce.
+if CLI is None and os.environ.get("CI"):
+    raise RuntimeError(
+        "Cybernetics SDK is not on PATH inside CI. Install it before running the repo tests: "
+        "pip install 'cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@<pin>'"
+    )
 
 pytestmark = pytest.mark.skipif(
     CLI is None,

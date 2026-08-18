@@ -38,6 +38,24 @@ env:
   CYBERNETICS_SDK_SPEC: "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@490dcb1d8e5b3e2479970a13cbee563561c22ebc"
 
 jobs:
+  repo-tests:
+    # Rob's "GPU jobs versus just unit tests" tier: plain pytest over the task packs and the
+    # anti-gaming assertions. Seconds, no credentials, runs on forks. If the SDK fails to
+    # install, the tests raise instead of skipping, so a broken install cannot read as green.
+    name: Repo tests (no GPU)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install pinned Cybernetics SDK
+        run: pip install "${CYBERNETICS_SDK_SPEC}" pytest
+      - name: Run the repo tests
+        env:
+          CI: "true"
+        run: pytest -q
+
   suite-contract:
     name: Contract suite (${{ matrix.subsystem }})
     runs-on: ubuntu-latest
