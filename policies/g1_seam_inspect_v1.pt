@@ -1,0 +1,17 @@
+{
+  "schema_version": "behavior-ci-policy/v2",
+  "policy_id": "g1_seam_inspect_v1",
+  "display_filename": "g1_seam_inspect_v1.pt",
+  "behavior": "g1_seam_inspect",
+  "robot": "Unitree G1-compatible humanoid proxy",
+  "backend": "scripted-vla-shim",
+  "task": "g1_seam_inspect",
+  "checkpoint": {
+    "gaze_mode": "relative",
+    "standoff_margin_cm": 20.0,
+    "sweep_coverage_gain": 0.8,
+    "dwell_s": 0.7
+  },
+  "expected_demo_result": "passed",
+  "notes": "Seam-relative inspection sweep: stand keep_out + 20 cm back (capped so the far end of the observed seam stays inside the range limit), then tile the seam's ANGULAR extent with gazes spaced so no seam point is more than 0.8x the 12 deg frustum half-angle from a gaze axis, holding each for 0.7 s against a 0.6 s minimum dwell. Clears all 8 visible + 8 held-out scenarios on all 3 domain settings (48/48); plan sizes range from 3 gazes / 3.13 s (90 cm seam) to 6 gazes / 7.01 s (280 cm seam). The 0.2 cone-overlap reserve is what absorbs the obs_noise column's ~2.0 deg of aim error; the 20 cm standoff reserve absorbs its 2.72 cm range error. Scripted checkpoint resolved by the scripted-vla-shim planner, NOT a learned policy; the task's plan() also implements the learned-mlp shape (feature_spec inspect-geometry/v1) but no trained checkpoint ships for it yet -- see the README."
+}

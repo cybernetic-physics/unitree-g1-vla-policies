@@ -1,0 +1,17 @@
+{
+  "schema_version": "behavior-ci-policy/v2",
+  "policy_id": "g1_seam_inspect_v1_nomargin",
+  "display_filename": "g1_seam_inspect_v1_nomargin.pt",
+  "behavior": "g1_seam_inspect",
+  "robot": "Unitree G1-compatible humanoid proxy",
+  "backend": "scripted-vla-shim",
+  "task": "g1_seam_inspect",
+  "checkpoint": {
+    "gaze_mode": "relative",
+    "standoff_margin_cm": 0.0,
+    "sweep_coverage_gain": 1.0,
+    "dwell_s": 0.7
+  },
+  "expected_demo_result": "failed",
+  "notes": "Deliberately ZERO-MARGIN twin of v1: same planner, but it spends the WHOLE frustum (sweep_coverage_gain 1.0, no cone overlap) and parks exactly on the keep-out radius (standoff_margin_cm 0.0). It is GREEN on all 16 scenarios at the 'nominal' domain -- it is geometrically correct, just with nothing in reserve -- and GREEN under 'actuation_degraded' (it is in fact cheaper than v1, using fewer gazes). Under 'obs_noise' it goes RED on 14 of 16 scenarios: 7 on coverage_complete (2.0 deg of aim error pushes an end target past the 12 deg cone, e.g. worst_target_gap 12.42 deg on visible row 0) and 7 on standoff_respected (the +x component of the perception error parks the head 0.09-2.69 cm INSIDE the keep-out). Kept as the honest red half of the perception behavior's red/green history."
+}

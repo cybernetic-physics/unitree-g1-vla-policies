@@ -1,0 +1,11 @@
+{
+  "schema_version": "behavior-ci-tasklock/v2",
+  "task_id": "g1_seam_inspect",
+  "task_version": "1",
+  "grader_entrypoint": "behavior_ci_run_trial",
+  "digests": {
+    "grader_isaac.py": "fbd12b521aa0425946813bea03d851dcb91c16d6f83743258b7d540ca5c83a34",
+    "task.py": "16b44d258a452d0da5fbc17f1af39c7821d0d907b842b90ffefe007449c43aac",
+    "task.toml": "aa770d849654950153ff71e910301eb0d9edfabe509c1f4c7e9ed2a99e2af030"
+  }
+}
