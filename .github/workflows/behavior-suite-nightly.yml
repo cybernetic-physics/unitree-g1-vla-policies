@@ -1,0 +1,140 @@
+name: Behavior Suite — nightly regression
+
+# The "or every nightly" half of behavior-level CI: run EVERY behavior in the suite against
+# the currently promoted policies and prove they all still work. Per-PR runs only grade what
+# a commit touched, so without this a behavior nobody edited can rot silently for weeks.
+#
+# Git-native by construction:
+#   * the suite manifest, the task packs and the policy pointers are files in this repo;
+#   * the pass/fail baseline is a committed file (baselines/main.json), so a change in what
+#     counts as "still working" arrives as a reviewable diff, not a silent database write;
+#   * a regression opens an issue rather than mutating anything.
+
+on:
+  schedule:
+    - cron: "17 7 * * *"   # 07:17 UTC daily, off the hour to avoid the scheduler stampede
+  workflow_dispatch:
+    inputs:
+      subsystem:
+        description: Limit the run to one subsystem (blank runs all).
+        required: false
+        type: choice
+        options: ["", manipulation, locomotion, perception]
+        default: ""
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: behavior-suite-nightly
+  cancel-in-progress: false
+
+env:
+  # Pinned by commit SHA so a nightly can never silently pick up a new judge.
+  # TODO-ON-MERGE: bump to the merge commit of cybernetic-physics/cybernetic#35.
+  CYBERNETICS_SDK_SPEC: "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@96275f8d3e861ac7c4b22da2db359ad74f2a79fb"
+
+jobs:
+  suite:
+    name: Full suite on the real G1
+    runs-on: ubuntu-latest
+    environment: behavior-ci
+    timeout-minutes: 90
+    env:
+      CYBERNETICS_API_KEY: ${{ secrets.CYBERNETICS_API_KEY }}
+      CYBERNETICS_MCP_API_KEY: ${{ secrets.CYBERNETICS_MCP_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pinned Cybernetics SDK
+        run: pip install "${CYBERNETICS_SDK_SPEC}"
+
+      - name: Run the full suite against the committed baseline
+        id: suite
+        shell: bash
+        run: |
+          set +e
+          filter=""
+          if [ -n "${{ inputs.subsystem }}" ]; then
+            filter="--subsystem ${{ inputs.subsystem }}"
+          fi
+          cybernetics behavior-ci suite run \
+            --suite behavior-ci-suite.yaml \
+            --config cybernetic-behavior-ci.hosted.yaml \
+            --baseline baselines/main.json \
+            --fail-on-regression \
+            --commit "${GITHUB_SHA}" \
+            --out artifacts/suite $filter
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Upload suite artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: behavior-suite-nightly
+          path: artifacts/suite
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Open or update the regression issue
+        if: always() && steps.suite.outputs.exit_code != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'artifacts/suite/suite-comment.md';
+            const body = fs.existsSync(path)
+              ? fs.readFileSync(path, 'utf8')
+              : `The nightly suite exited ${{ steps.suite.outputs.exit_code }} before it could write a report. See the run log.`;
+            const title = 'Behavior suite: nightly regression';
+            const marker = '<!-- behavior-suite-nightly -->';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const full = `${marker}\n${body}\n\n[Nightly run](${runUrl}) · commit \`${context.sha.slice(0, 7)}\``;
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'behavior-suite',
+            });
+            const existing = open.data.find(i => i.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: existing.number, body: full,
+              });
+              core.info(`commented on #${existing.number}`);
+            } else {
+              const made = await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, body: full, labels: ['behavior-suite'],
+              });
+              core.info(`opened #${made.data.number}`);
+            }
+
+      - name: Close the regression issue when the suite is green again
+        if: always() && steps.suite.outputs.exit_code == '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'behavior-suite',
+            });
+            for (const issue of open.data.filter(i => i.title === 'Behavior suite: nightly regression')) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `Nightly suite is green again at \`${context.sha.slice(0, 7)}\`. Closing.`,
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: issue.number, state: 'closed',
+              });
+            }
+
+      - name: Fail the run when the suite failed
+        if: steps.suite.outputs.exit_code != '0'
+        run: exit 1
