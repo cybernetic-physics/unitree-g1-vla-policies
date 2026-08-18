@@ -43,6 +43,13 @@ SEAM = "/World/WeldSeam"
 OBSTACLE = "/World/Obstacle"
 ZONE = "/World/RestrictedZone"
 CM_TO_M = 0.01
+# Where the task-local frame is drawn in the SAVED cicd_ship_yard scene (meters). Purely a
+# replay-visualization anchor -- the verdict is the pure measure() over task-frame geometry,
+# which this offset never touches. Chosen so the schematic seam marker coincides with the
+# physical weld ring on the elevated pipe (the calibrated v19 reach of the fixed-base G1:
+# seam_pose (120, 0, 5) cm + anchor = (0.478, 0.026, 1.13) m, measured in-session by
+# isaac/scene_realism.py).
+WORLD_ANCHOR_M = (-0.722, 0.026, 1.08)
 
 
 def _omni():
@@ -75,7 +82,7 @@ def _failure_result(run, code, message):
 
 
 def _place_box(stage, UsdGeom, Gf, path, box, color, opacity=1.0):
-    c = [box["center"][i] * CM_TO_M for i in range(3)]
+    c = [box["center"][i] * CM_TO_M + WORLD_ANCHOR_M[i] for i in range(3)]
     s = [2.0 * box["half_extents"][i] * CM_TO_M for i in range(3)]
     cube = UsdGeom.Cube.Define(stage, path)
     cube.CreateSizeAttr(1.0)
@@ -89,7 +96,7 @@ def _place_box(stage, UsdGeom, Gf, path, box, color, opacity=1.0):
 
 
 def _place_point(stage, UsdGeom, Gf, path, pose_cm):
-    c = [pose_cm[i] * CM_TO_M for i in range(3)]
+    c = [pose_cm[i] * CM_TO_M + WORLD_ANCHOR_M[i] for i in range(3)]
     s = UsdGeom.Sphere.Define(stage, path)
     s.CreateRadiusAttr(0.02)
     x = UsdGeom.Xformable(s.GetPrim())

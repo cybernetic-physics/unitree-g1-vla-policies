@@ -513,7 +513,9 @@ class BaseTraverse(Task):
     robot = "Unitree G1-compatible humanoid proxy"
     world = "shop_floor_aisle_clutter_shift_v1"
     scene_env = "behavior-ci-shop-floor-aisle"
-    camera = "/World/Cameras/BehaviorCI_TraverseCamera"
+    camera = "/World/Cameras/BehaviorCI_PassFailCamera"  # the shipyard scene ships one
+    # calibrated pass/fail camera; a per-behavior camera would have to be authored and
+    # verified in-session first, and an un-authored camera path fails the scene check.
     env_id = "env_7d904291a384a1ae"
 
     # Domain sweep contract (consumed by the SDK suite layer).
