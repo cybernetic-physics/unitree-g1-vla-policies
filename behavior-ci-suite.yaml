@@ -1,0 +1,36 @@
+# The Behavior CI SUITE: every behavior we have built up, one row each, run together.
+#
+# This is the artifact the pilot is actually about -- not "does the weld policy still work"
+# but "do all of the behaviors we have built up from the subsystem layer still work, with
+# goal conditions, and do they still work when you vary the domain parameters".
+#
+# Each row names a subsystem (manipulation / locomotion / perception), the pinned task that
+# judges it, the policy under test, and the goal in one sentence. The domain sweep itself is
+# NOT declared here -- it lives in the task pack (`domain_sweep` on the registered Task), for
+# the same reason the thresholds do: a suite file in the candidate repo must not be able to
+# choose which domains it is graded on. Every behavior below is graded on its pack's full
+# sweep, so the trial count per row is (visible + held_out) x len(domain_sweep) = 16 x 3 = 48.
+schema_version: behavior-ci-suite/v1
+project: unitree-g1-vla-policies
+defaults: { eval: obstacle_shift }
+behaviors:
+  - id: weld_approach
+    subsystem: manipulation
+    task: g1_weld_approach
+    policy: policies/g1_weld_approach_v24.pt
+    eval: obstacle_shift
+    goal: "Route the torch to the weld seam around the shifted obstacle, inside the time budget, without collision, restricted-zone intrusion, or excess base tilt."
+
+  - id: base_traverse
+    subsystem: locomotion
+    task: g1_base_traverse
+    policy: policies/g1_base_traverse_v1.pt
+    eval: aisle_clutter_shift
+    goal: "Walk from the start pose to the work position at the far end of a cluttered aisle, inside the time budget, clear of the pallet and the restricted zone, without exceeding the base-tilt limit."
+
+  - id: seam_inspect
+    subsystem: perception
+    task: g1_seam_inspect
+    policy: policies/g1_seam_inspect_v1.pt
+    eval: seam_layout_shift
+    goal: "From a standoff position, aim the head camera so every required inspection target on the weld seam is held inside the camera frustum for the minimum dwell, inside the time budget, without entering the standoff keep-out."

@@ -61,6 +61,72 @@ including the held-out ones.
 All of this is visible in the **secrets-free `contract` job**, so anyone — including a fork —
 can see the gate work without a hosted session.
 
+## The suite: every behavior we've built up, run together
+
+One behavior is a demo. The thing a robotics team actually needs is *all of the existing
+behaviors we've built up — from the subsystem layer — run with goal conditions, giving a yes
+or no answer, while you vary the domain parameters.* That is `behavior-ci-suite.yaml`:
+
+| Behavior | Subsystem | Task pack | Goal |
+|---|---|---|---|
+| `weld_approach` | manipulation | `g1_weld_approach` | route the torch to the seam around the shifted obstacle |
+| `base_traverse` | locomotion | `g1_base_traverse` | walk the cluttered aisle to the work position |
+| `seam_inspect` | perception | `g1_seam_inspect` | aim the head camera so every seam target is inspected |
+
+```bash
+cybernetics behavior-ci suite run --suite behavior-ci-suite.yaml \
+  --config cybernetic-behavior-ci.yaml --out artifacts/suite
+```
+
+```
+[PASS] weld_approach (manipulation) 48/48 trials — Route the torch to the weld seam around …
+[PASS] base_traverse (locomotion)   48/48 trials — Walk from the start pose to the work position …
+[PASS] seam_inspect (perception)    48/48 trials — From a standoff position, aim the head camera …
+[PASS] suite 3/3 behaviors passed (grading=geometric-contract, simulator=fixture)
+```
+
+Each pack is judged the same way the weld pack always was: 8 visible + 8 held-out scenarios,
+built so **no constant answer clears both sets**. The specific numbers are in each
+`tasks/<id>/task.py` module docstring under `ANTI-OVERFIT INVARIANT` — e.g. for the traverse,
+the held-out racking row forbids a lateral offset ≥ 145 cm while two other held-out rows
+require > 150 cm and > 175 cm, and a 1 cm sweep over every constant offset in [60, 400] cm
+never does better than 15/16.
+
+## Domain sweeps: does it still work when the world moves?
+
+48 trials, not 16, because each pack declares a `domain_sweep` and **every scenario is graded
+once per domain setting**:
+
+| Domain | What varies |
+|---|---|
+| `nominal` | nothing — the neutral control, numerically identical to a pre-sweep run |
+| `obs_noise` | what the policy is allowed to SEE is displaced by a few cm |
+| `actuation_degraded` | the achieved speed is scaled down and a start-up latency is charged |
+
+The asymmetry is the point: `apply_domain()` perturbs only the **observation handed to the
+policy**, while `measure()` always grades against the **truth** geometry. So a policy cannot
+pass by being graded against its own mis-estimate — the same thing that happens on hardware.
+
+That makes the sweep falsifiable, and this repo ships the falsification. `*_nomargin.pt` are
+policies that are *geometrically correct with zero reserve*:
+
+| Policy | `nominal` | `obs_noise` | `actuation_degraded` |
+|---|---|---|---|
+| `g1_base_traverse_v1` (margin 65 cm) | 16/16 | 16/16 | 16/16 |
+| `g1_base_traverse_v1_nomargin` (margin 53 cm) | 16/16 | **14/16** ❌ | 16/16 |
+| `g1_seam_inspect_v1` (0.8× cone, +20 cm standoff) | 16/16 | 16/16 | 16/16 |
+| `g1_seam_inspect_v1_nomargin` (1.0× cone, +0 cm standoff) | 16/16 | **2/16** ❌ | 16/16 |
+
+Both twins are green in the nominal world and red only under observation noise, and each
+failure record in `result.json` names the scenario *and* the domain that produced it. A sweep
+that couldn't separate those two policies would be decoration.
+
+The sweep values are **per pack**, and deliberately so: the weld pack's shipped policies are
+frozen red/green history that must not be re-tuned, and they use 26.8 s of a 30 s budget on
+the far-seam rows — so its degraded column is `speed_scale 0.95 / latency_s 0.5`, not the
+`0.8 / 1.5` the locomotion pack was designed with. A uniform setting would have been cosmetic;
+the reasoning for every number is in the `DOMAIN_SWEEP` comment in each `task.py`.
+
 ## Two backends
 
 | Adapter | What runs | Needs |
@@ -105,6 +171,14 @@ otherwise.
 
 ## Honesty
 
+The two new behaviors (`g1_base_traverse_v1`, `g1_seam_inspect_v1`) ship **scripted**
+checkpoints, not learned ones. Their `task.py` planners implement the `learned-mlp` checkpoint
+shape as well (`feature_spec traverse-geometry/v1` / `inspect-geometry/v1`, normalized geometry
+in, clamped plan parameters out), but the SDK's `learned-mlp` backend currently admits only
+`weld-geometry/v1`, so no trained checkpoint can be minted for them yet and none is claimed. A
+learned twin for either behavior would ship with its own training script, exactly as
+`scripts/train_weld_mlp.py` backs v24.
+
 The v18–v22 `.pt` files are JSON manifests resolved by a `scripted-vla-shim` planner — **not**
 learned policies; they remain checked in as the original red/green demo history. From v24 the
 manifests carry **real trained MLP weights** (see above) — learned, but still not a VLA, and
@@ -136,11 +210,25 @@ pip install "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic
 cybernetics behavior-ci run --config cybernetic-behavior-ci.yaml \
   --policy-ref policies/g1_weld_approach_v21.pt --eval obstacle_shift --out artifacts/behavior-ci
 
-# the real learned MLP policy -> exit 0 (16/16 incl. held-out)
+# the real learned MLP policy -> exit 0 (48/48: 16 scenarios x 3 domain settings)
 cybernetics behavior-ci run --config cybernetic-behavior-ci.yaml \
   --policy-ref policies/g1_weld_approach_v24.pt --eval obstacle_shift --out artifacts/behavior-ci
 
-# integrity gate (closed schema + pinned eval/grader)
+# the locomotion + perception behaviors -> exit 0
+cybernetics behavior-ci run --config cybernetic-behavior-ci.yaml \
+  --policy-ref policies/g1_base_traverse_v1.pt --eval aisle_clutter_shift --out artifacts/behavior-ci
+cybernetics behavior-ci run --config cybernetic-behavior-ci.yaml \
+  --policy-ref policies/g1_seam_inspect_v1.pt --eval seam_layout_shift --out artifacts/behavior-ci
+
+# a zero-margin twin -> exit 1, red only on the obs_noise domain column
+cybernetics behavior-ci run --config cybernetic-behavior-ci.yaml \
+  --policy-ref policies/g1_seam_inspect_v1_nomargin.pt --eval seam_layout_shift --out artifacts/behavior-ci
+
+# the whole suite (manipulation + locomotion + perception) in one shot
+cybernetics behavior-ci suite run --suite behavior-ci-suite.yaml \
+  --config cybernetic-behavior-ci.yaml --out artifacts/suite
+
+# integrity gate (closed schema + pinned eval/grader), per pack
 cybernetics behavior-ci verify-task --config cybernetic-behavior-ci.yaml \
-  --policy-ref policies/g1_weld_approach_v21.pt
+  --policy-ref policies/g1_base_traverse_v1.pt
 ```
