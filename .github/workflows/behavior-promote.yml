@@ -1,0 +1,119 @@
+name: Behavior Suite — promote
+
+# The CD half, and it lives entirely in git.
+#
+# When main is green for the WHOLE suite, this moves the `promoted` branch to that commit and
+# writes an annotated tag. Nothing else changes: `promoted` is an ordinary branch whose tip is
+# always a commit whose every behavior passed, so anything that consumes policies (a robot
+# image build, a deployment job, an operator checking what is on the machine) can pin to
+# `promoted` or to a fixed tag instead of trusting a dashboard.
+#
+#   git fetch origin promoted        # what is currently blessed
+#   git log --oneline promoted       # the promotion history, reviewable and revertable
+#   git revert / reset promoted      # rollback is a git operation, not a console click
+#
+# A policy is already a pinned pointer file in this repo, so a tag pins the exact policy set,
+# the exact task packs that judged them, and the exact thresholds, together.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "policies/**"
+      - "tasks/**"
+      - "behavior-ci-suite.yaml"
+      - "cybernetic-behavior-ci*.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: behavior-promote
+  cancel-in-progress: false
+
+env:
+  # TODO-ON-MERGE: bump to the merge commit of cybernetic-physics/cybernetic#35.
+  CYBERNETICS_SDK_SPEC: "cybernetic-physics[behavior-ci] @ git+https://github.com/cybernetic-physics/cybernetic.git@490dcb1d8e5b3e2479970a13cbee563561c22ebc"
+
+jobs:
+  promote:
+    name: Promote main to the current branch
+    runs-on: ubuntu-latest
+    environment: behavior-ci
+    timeout-minutes: 90
+    env:
+      CYBERNETICS_API_KEY: ${{ secrets.CYBERNETICS_API_KEY }}
+      CYBERNETICS_MCP_API_KEY: ${{ secrets.CYBERNETICS_MCP_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pinned Cybernetics SDK
+        run: pip install "${CYBERNETICS_SDK_SPEC}"
+
+      - name: Run the full suite on the real G1
+        id: suite
+        shell: bash
+        run: |
+          set +e
+          cybernetics behavior-ci suite run \
+            --suite behavior-ci-suite.yaml \
+            --config cybernetic-behavior-ci.hosted.yaml \
+            --commit "${GITHUB_SHA}" \
+            --out artifacts/suite
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Upload suite artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: behavior-suite-promote
+          path: artifacts/suite
+          if-no-files-found: warn
+
+      - name: Refuse to promote a red suite
+        if: steps.suite.outputs.exit_code != '0'
+        run: |
+          echo '::error::Suite is red; the promoted branch stays where it is.'
+          exit 1
+
+      - name: Move `promoted` and tag the blessed policy set
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="behaviors-$(date -u +%Y.%m.%d)-${GITHUB_SHA::7}"
+          git config user.name  "behavior-ci[bot]"
+          git config user.email "behavior-ci@users.noreply.github.com"
+
+          # `promoted` is a plain branch pointer: fast, revertable, no bespoke state anywhere.
+          git push --force-with-lease origin "${GITHUB_SHA}:refs/heads/promoted"
+
+          passed=$(python3 -c "import json;d=json.load(open('artifacts/suite/suite-result.json'));print(d['summary']['passed'])")
+          total=$(python3 -c "import json;d=json.load(open('artifacts/suite/suite-result.json'));print(d['summary']['total'])")
+          git tag -a "$tag" -m "Behavior suite green: ${passed}/${total} behaviors passed at ${GITHUB_SHA::7}."
+          git push origin "$tag"
+          echo "promoted -> ${GITHUB_SHA::7}, tag ${tag}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Refresh the committed baseline on main
+        shell: bash
+        run: |
+          set -euo pipefail
+          cybernetics behavior-ci suite baseline \
+            --result artifacts/suite/suite-result.json \
+            --out baselines/main.json
+          if git diff --quiet -- baselines/main.json; then
+            echo "baseline unchanged" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git add baselines/main.json
+          git commit -m "baseline: refresh from green suite at ${GITHUB_SHA::7}
+
+          Committed so that what counts as a regression is reviewable in a diff
+          rather than hidden in CI state. [skip ci]"
+          git push origin "HEAD:main"

@@ -1,0 +1,18 @@
+{
+  "schema_version": "behavior-ci-policy/v2",
+  "policy_id": "g1_base_traverse_v1",
+  "display_filename": "g1_base_traverse_v1.pt",
+  "behavior": "g1_base_traverse",
+  "robot": "Unitree G1-compatible humanoid proxy",
+  "backend": "scripted-vla-shim",
+  "task": "g1_base_traverse",
+  "checkpoint": {
+    "offset_mode": "relative",
+    "offset_gain": 1.0,
+    "clearance_margin_cm": 65.0,
+    "detour_half_span_cm": 200.0,
+    "walk_speed_mps": 1.2
+  },
+  "expected_demo_result": "passed",
+  "notes": "Pallet-relative aisle traverse: the detour shelf is sized from the OBSERVED pallet's far face plus a 65 cm margin, walked at 1.2 m/s. Clears all 8 visible + 8 held-out scenarios on all 3 domain settings (48/48). The admissible margin window is [53, 99] cm at nominal -- below 53 the diagonal leg clips the keep-out band, at or above 100 the shelf enters the racking strip -- so 65 sits 12 cm above the floor and 34 cm below the ceiling, and still clears with 9 cm to spare under the obs_noise column (which moves the effective margin by -2.94 cm). This is a scripted checkpoint resolved by the scripted-vla-shim planner, NOT a learned policy; the task's plan() also implements the learned-mlp shape (feature_spec traverse-geometry/v1) but no trained checkpoint ships for it yet -- see the README."
+}

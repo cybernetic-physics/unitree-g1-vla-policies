@@ -104,6 +104,83 @@ def build_observation(scenario: dict) -> dict:
 
 
 # ----------------------------------------------------------------------------------------
+# Domain sweep (the customer's "vary the domain parameters")
+# ----------------------------------------------------------------------------------------
+# A domain setting perturbs (a) what the policy is ALLOWED TO SEE and (b) how the hardware
+# actually performs. The truth observation is never touched, so measurement is unaffected by
+# the perception perturbation -- that asymmetry is the point: a policy that only just clears
+# the geometry has nothing left when its perception is a couple of cm off.
+#
+#   obs_noise_cm : the OBSERVED obstacle is displaced by this many cm along a direction derived
+#                  deterministically from the domain id (never random at runtime).
+#   speed_scale  : multiplies the achieved torch travel speed.
+#   latency_s    : dead time before the torch starts moving; equivalently, this much comes off
+#                  the usable time budget.
+#
+# Why these three values -- this pack is the OLDEST behavior here and its shipped policies were
+# tuned before domain sweeps existed, so the honest values are tighter than the newer packs':
+#   * "nominal" is the neutral control; its trials are numerically identical to a run with no
+#     domain at all, which is what makes the other two columns readable.
+#   * obs_noise_cm 3.0: the binding geometry is the 'safety_zone' band, ZONE_W = 8 cm wide,
+#     against v21/v24's clearance_margin_cm of 12 -- only 4 cm of true slack. The "obs_noise"
+#     direction contributes -2.202 cm to the apex, leaving 1.8 cm. A 4 cm setting (what the
+#     locomotion and perception packs use) would consume the whole margin and fail a policy
+#     that is geometrically correct, which would make the sweep a liar rather than a test.
+#   * speed_scale 0.95 / latency_s 0.5: the binding row is visible row 7 (seam at 300 cm),
+#     which v21 covers in 26.80 s of a 30 s budget at its shipped 0.12 m/s -- 11% of headroom,
+#     and the policy files are frozen red/green history that must not be re-tuned. Degraded,
+#     that row measures 0.5 + 3.216/(0.12*0.95) = 28.71 s, still inside the budget. The
+#     locomotion and perception packs were designed with headroom and carry 0.8 / 1.5 and
+#     0.8 / 0.6 respectively; a uniform setting across packs would be cosmetic, not honest.
+DOMAIN_SWEEP = [
+    {"id": "nominal", "obs_noise_cm": 0.0, "speed_scale": 1.0, "latency_s": 0.0},
+    {"id": "obs_noise", "obs_noise_cm": 3.0, "speed_scale": 1.0, "latency_s": 0.0},
+    {"id": "actuation_degraded", "obs_noise_cm": 0.0, "speed_scale": 0.95, "latency_s": 0.5},
+]
+
+
+def _domain_direction(domain_id: str) -> tuple:
+    """Unit (dx, dy) for a domain id: FNV-1a over the id -> an angle on a 0.1-degree grid.
+
+    Deterministic and stable across processes/platforms (no hash randomization, no RNG), so a
+    sweep is reproducible from the id alone. The shipped id "obs_noise" resolves to
+    theta = 312.8 deg -> (dx, dy) = (+0.679, -0.734): the -y component pulls the OBSERVED
+    obstacle face back toward the direct line, i.e. the policy under-sizes its detour. That is
+    the adverse direction for this pack, and it is chosen on purpose -- a domain column that
+    only ever helps the policy proves nothing.
+    """
+    h = 2166136261
+    for ch in domain_id:
+        h = ((h ^ ord(ch)) * 16777619) & 0xFFFFFFFF
+    theta = 2.0 * math.pi * ((h % 3600) / 3600.0)
+    return math.cos(theta), math.sin(theta)
+
+
+def apply_domain(observation: dict, domain: dict | None) -> dict:
+    """Return a COPY of ``observation`` with the perception perturbation applied.
+
+    Only the obstacle -- the thing this behavior has to route around -- moves. The seam pose,
+    the start pose and the posted restricted zone are survey data and stay put, so this models
+    sensing error rather than a different world (and in particular the 2 cm target_reach
+    threshold is not quietly turned into a coin flip). measure() is always handed the untouched
+    truth observation.
+    """
+    if not domain:
+        return dict(observation)
+    noise = float(domain.get("obs_noise_cm", 0.0) or 0.0)
+    out = dict(observation)
+    if noise:
+        dx, dy = _domain_direction(str(domain.get("id", "")))
+        box = observation["obstacle_box"]
+        c = box["center"]
+        out["obstacle_box"] = {
+            "center": [c[0] + noise * dx, c[1] + noise * dy, c[2]],
+            "half_extents": list(box["half_extents"]),
+        }
+    return out
+
+
+# ----------------------------------------------------------------------------------------
 # Action planner (checkpoint -> trajectory)
 # ----------------------------------------------------------------------------------------
 # Physical ceiling on torch travel speed (m/s). A real welding end-effector does not move
@@ -270,24 +347,35 @@ def _perp_dist_to_line(p, a, b):
     return _dist(p, proj)
 
 
-def measure(trajectory: dict, observation: dict) -> dict:
+def measure(trajectory: dict, observation: dict, domain: dict | None = None) -> dict:
+    """Re-derive every metric from the emitted trajectory against the TRUTH geometry.
+
+    ``domain`` is the actuation half of a domain sweep row: ``speed_scale`` multiplies the
+    achieved torch speed and ``latency_s`` is dead time before the torch moves (equivalently,
+    it comes off the usable time budget). With ``domain=None`` -- or the neutral "nominal" row
+    -- both are identity and the arithmetic is bit-for-bit what it was before domain sweeps
+    existed, so the frozen v18/v19/v21/v24 verdicts are unchanged.
+    """
+    speed_scale = float((domain or {}).get("speed_scale", 1.0) or 1.0)
+    latency = float((domain or {}).get("latency_s", 0.0) or 0.0)
+
     wps = [list(w) for w in trajectory["waypoints"]]
-    speed = float(trajectory["speed_mps"])
-    budget = float(observation["time_budget_s"])
+    speed = float(trajectory["speed_mps"]) * speed_scale
+    budget = float(observation["time_budget_s"]) - latency
     start = list(observation["start_pose"])
     seam = list(observation["seam_pose"])
 
     # full intended path length (cm)
     length_cm = sum(_dist(wps[i], wps[i + 1]) for i in range(len(wps) - 1))
 
-    # time the full path WOULD take (s)
+    # time the full path WOULD take (s), including the domain's dead time
     if speed <= 0:
         elapsed = float("inf")
     else:
-        elapsed = (length_cm / 100.0) / speed
+        elapsed = latency + (length_cm / 100.0) / speed
 
-    # arc-length the torch can physically cover within the time budget (cm)
-    reachable_cm = speed * budget * 100.0 if speed > 0 else 0.0
+    # arc-length the torch can physically cover within the usable time budget (cm)
+    reachable_cm = speed * budget * 100.0 if speed > 0 and budget > 0 else 0.0
     s_max = min(length_cm, reachable_cm)
 
     traversed = _truncate(wps, s_max)
@@ -344,11 +432,21 @@ def measure(trajectory: dict, observation: dict) -> dict:
 @register_task("g1_weld_approach")
 class WeldApproach(Task):
     behavior = "g1_weld_approach"
+    subsystem = "manipulation"
+    goal = (
+        "Route the torch from its start pose to the weld seam around the shifted obstacle, "
+        "inside the time budget, without colliding, entering the restricted zone, or "
+        "exceeding the base-tilt limit."
+    )
     robot = "Unitree G1-compatible humanoid proxy"
     world = "tabletop_welding_obstacle_shift_v1"
     scene_env = "behavior-ci-tabletop-welding"
     camera = "/World/Cameras/BehaviorCI_PassFailCamera"
     env_id = "env_7d904291a384a1ae"
+
+    # Domain sweep contract (consumed by the SDK suite layer).
+    supports_domain = True
+    domain_sweep = [dict(d) for d in DOMAIN_SWEEP]
 
     def scenarios(self):
         return list(VISIBLE), list(HELD_OUT)
@@ -356,11 +454,14 @@ class WeldApproach(Task):
     def build_observation(self, scenario):
         return build_observation(scenario)
 
+    def apply_domain(self, observation, domain):
+        return apply_domain(observation, domain)
+
     def plan(self, checkpoint, observation):
         return plan(checkpoint, observation)
 
-    def measure(self, trajectory, observation):
-        return measure(trajectory, observation)
+    def measure(self, trajectory, observation, domain=None):
+        return measure(trajectory, observation, domain)
 
     def checks(self):
         return {

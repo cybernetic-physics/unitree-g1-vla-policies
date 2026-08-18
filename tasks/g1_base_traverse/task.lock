@@ -1,0 +1,11 @@
+{
+  "schema_version": "behavior-ci-tasklock/v2",
+  "task_id": "g1_base_traverse",
+  "task_version": "1",
+  "grader_entrypoint": "behavior_ci_run_trial",
+  "digests": {
+    "grader_isaac.py": "37cef4944e15147caa7c29d14ebd7a3948c3b5dc51781bb27bc7bb9458a9c641",
+    "task.py": "7507c7c28727691d599247f58f09d45d5687a6c6751be75bb925e99863cc9777",
+    "task.toml": "b7e9804804969c786f60d7ffd0465150936fa9b56e3972cd24a2aab53ccf7168"
+  }
+}

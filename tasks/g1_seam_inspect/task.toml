@@ -1,0 +1,7 @@
+schema_version = "behavior-ci-task/v2"
+task_id = "g1_seam_inspect"
+task_version = "1"
+module = "task.py"
+grader_module = "grader_isaac.py"
+grader_entrypoint = "behavior_ci_run_trial"
+lock = "task.lock"
